@@ -40,12 +40,17 @@ PUBLIC_API_URL=http://localhost:4001
 MONGODB_URI=mongodb://127.0.0.1:27017/barkan
 SESSION_SECRET=replace-with-a-long-random-secret
 ELEVENLABS_API_KEY=
+ELEVENLABS_AGENT_ID=
+ELEVENLABS_AGENT_PHONE_NUMBER_ID=
 ELEVENLABS_VOICE_ID=kPzsL2i3teMYv0FxEYQ6
 OPENAI_API_KEY=
 OPENAI_WIDGET_MODEL=gpt-5.4-2026-03-05
 OPENAI_ACTION_MODEL=gpt-5.4-mini-2026-03-17
 OPENAI_ATLAS_MODEL=gpt-5.4-2026-03-05
+OPENAI_DASHBOARD_CHAT_MODEL=gpt-5.4-2026-03-05
 ```
+
+The dashboard chat simulates an OpenClaw runtime with a phone-call tool. Calls run in mock mode until `ELEVENLABS_API_KEY`, `ELEVENLABS_AGENT_ID`, and `ELEVENLABS_AGENT_PHONE_NUMBER_ID` are all set, then it uses the ElevenLabs Twilio outbound-call endpoint.
 
 Run locally:
 
