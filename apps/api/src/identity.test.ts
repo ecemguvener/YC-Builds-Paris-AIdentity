@@ -4,7 +4,8 @@ import { registerIdentityRoutes } from "./identity.js";
 import type { AppConfig } from "./config.js";
 
 const config = {
-  PUBLIC_API_URL: "http://localhost:4001"
+  PUBLIC_API_URL: "http://localhost:4001",
+  EMAIL_FROM_DOMAIN: "agents.barkan.dev"
 } as AppConfig;
 
 describe("identity layer routes", () => {
@@ -34,31 +35,29 @@ describe("identity layer routes", () => {
     expect(initPayload.identity_token).toMatch(/^identity_live_/);
     expect(initPayload.email).toContain("@agents.barkan.dev");
 
-    const blockedEmailResponse = await app.inject({
+    const blockedCallResponse = await app.inject({
       method: "POST",
-      url: "/api/tools/email/send",
+      url: "/api/tools/phone/call",
       headers: { authorization: `Bearer ${initPayload.identity_token}` },
       payload: {
-        to: "demo@example.com",
-        subject: "Hello",
-        body: "Can we talk?"
+        to: "+1 555 0100",
+        script: "Hi, can we talk?"
       }
     });
-    expect(blockedEmailResponse.statusCode).toBe(403);
+    expect(blockedCallResponse.statusCode).toBe(403);
 
-    const allowedEmailResponse = await app.inject({
+    const allowedCallResponse = await app.inject({
       method: "POST",
-      url: "/api/tools/email/send",
+      url: "/api/tools/phone/call",
       headers: { authorization: `Bearer ${initPayload.identity_token}` },
       payload: {
-        to: "demo@example.com",
-        subject: "Hello",
-        body: "Can we talk?",
+        to: "+1 555 0100",
+        script: "Hi, can we talk?",
         approved: true
       }
     });
-    expect(allowedEmailResponse.statusCode).toBe(200);
-    expect(allowedEmailResponse.json<{ ok: boolean }>().ok).toBe(true);
+    expect(allowedCallResponse.statusCode).toBe(200);
+    expect(allowedCallResponse.json<{ ok: boolean }>().ok).toBe(true);
 
     const auditResponse = await app.inject({
       method: "GET",
@@ -67,7 +66,7 @@ describe("identity layer routes", () => {
     });
     expect(auditResponse.statusCode).toBe(200);
     expect(auditResponse.json<{ audit_log: Array<{ action: string }> }>().audit_log.map((entry) => entry.action)).toContain(
-      "email.send"
+      "phone.call"
     );
 
     const revokeResponse = await app.inject({
@@ -77,18 +76,17 @@ describe("identity layer routes", () => {
     });
     expect(revokeResponse.statusCode).toBe(200);
 
-    const revokedEmailResponse = await app.inject({
+    const revokedCallResponse = await app.inject({
       method: "POST",
-      url: "/api/tools/email/send",
+      url: "/api/tools/phone/call",
       headers: { authorization: `Bearer ${initPayload.identity_token}` },
       payload: {
-        to: "demo@example.com",
-        subject: "After revoke",
-        body: "This should not send.",
+        to: "+1 555 0100",
+        script: "This should not place a call.",
         approved: true
       }
     });
-    expect(revokedEmailResponse.statusCode).toBe(403);
+    expect(revokedCallResponse.statusCode).toBe(403);
 
     await app.close();
   });

@@ -55,13 +55,6 @@ const initIdentitySchema = z.object({
     .optional()
 });
 
-const emailSendSchema = z.object({
-  to: z.string().email(),
-  subject: z.string().min(1).max(200),
-  body: z.string().min(1).max(5000),
-  approved: z.boolean().optional()
-});
-
 const phoneCallSchema = z.object({
   to: z.string().min(3).max(40),
   script: z.string().min(1).max(5000),
@@ -98,7 +91,7 @@ export function registerIdentityRoutes(app: FastifyInstance, config: AppConfig) 
       status: "active",
       tools,
       permissions,
-      email: tools.includes("email") ? `${slug}-${randomId(4)}@agents.barkan.dev` : null,
+      email: tools.includes("email") ? `${slug}-${randomId(4)}@${config.EMAIL_FROM_DOMAIN}` : null,
       phone: tools.includes("phone") ? `+1 415 555 ${randomDigits(4)}` : null,
       calendarUrl: tools.includes("calendar") ? `${config.PUBLIC_API_URL}/calendar/${id}` : null,
       createdAt: new Date()
@@ -107,6 +100,11 @@ export function registerIdentityRoutes(app: FastifyInstance, config: AppConfig) 
     identitiesByToken.set(token, identity);
     identitiesById.set(id, identity);
     pushAudit(identity, "identity.init", "allowed", `${identity.name} initialized for ${identity.runtime}.`);
+
+    if (tools.includes("email") && identity.email) {
+      const { provisionEmailIdentity } = await import("./email.js");
+      provisionEmailIdentity(identity.id, identity.email, identity.name, config);
+    }
 
     let payment: {
       payment_identity_id: string;
@@ -142,7 +140,11 @@ export function registerIdentityRoutes(app: FastifyInstance, config: AppConfig) 
         AGENT_IDENTITY_TOKEN: identity.token
       },
       tool_endpoints: {
+        email_request: `${config.PUBLIC_API_URL}/api/tools/email/request`,
         email_send: `${config.PUBLIC_API_URL}/api/tools/email/send`,
+        email_pause: `${config.PUBLIC_API_URL}/api/tools/email/pause`,
+        email_resume: `${config.PUBLIC_API_URL}/api/tools/email/resume`,
+        email_activity: `${config.PUBLIC_API_URL}/api/identity/${identity.id}/email-activity`,
         phone_call: `${config.PUBLIC_API_URL}/api/tools/phone/call`,
         calendar_book: `${config.PUBLIC_API_URL}/api/tools/calendar/book`,
         payment_request_purchase: `${config.PUBLIC_API_URL}/api/tools/payments/request-purchase`,
@@ -151,30 +153,6 @@ export function registerIdentityRoutes(app: FastifyInstance, config: AppConfig) 
         audit_log: `${config.PUBLIC_API_URL}/api/identity/${identity.id}/audit-log`
       }
     });
-  });
-
-  app.post("/api/tools/email/send", async (request, reply) => {
-    const identity = readBearerIdentity(request.headers.authorization);
-    if (!identity) {
-      return reply.code(401).send({ error: "missing or invalid identity token" });
-    }
-
-    const payload = emailSendSchema.parse(request.body ?? {});
-    const block = checkAction(identity, "email.send", payload.approved);
-    if (block) {
-      pushAudit(identity, "email.send", "blocked", block);
-      return reply.code(403).send({ error: block });
-    }
-
-    pushAudit(identity, "email.send", "allowed", `Email sent to ${payload.to}: ${payload.subject}`);
-    return {
-      ok: true,
-      provider: "demo-resend",
-      message_id: `msg_${randomId(12)}`,
-      from: identity.email,
-      to: payload.to,
-      subject: payload.subject
-    };
   });
 
   app.post("/api/tools/phone/call", async (request, reply) => {

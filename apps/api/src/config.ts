@@ -27,7 +27,13 @@ const environmentSchema = z.object({
   OPENAI_API_KEY: optionalNonEmptyStringSchema,
   OPENAI_WIDGET_MODEL: z.string().min(1).default("gpt-5.4-2026-03-05").transform(normalizeConfiguredOpenAIWidgetModel),
   OPENAI_ACTION_MODEL: z.string().min(1).default("gpt-5.4-2026-03-05").transform(normalizeConfiguredOpenAIModel),
-  OPENAI_ATLAS_MODEL: z.string().min(1).default("gpt-5.4-2026-03-05").transform(normalizeConfiguredOpenAIModel)
+  OPENAI_ATLAS_MODEL: z.string().min(1).default("gpt-5.4-2026-03-05").transform(normalizeConfiguredOpenAIModel),
+  // Email capability add-on. When RESEND_API_KEY is unset the capability runs in
+  // mock mode (it logs the message and returns a synthetic id) so the full flow
+  // is demoable without a verified sending domain.
+  RESEND_API_KEY: optionalNonEmptyStringSchema,
+  EMAIL_FROM_DOMAIN: z.string().min(1).default("agents.barkan.dev"),
+  EMAIL_WEBHOOK_SECRET: optionalNonEmptyStringSchema
 }).transform((environment) => {
   return {
     ...environment,

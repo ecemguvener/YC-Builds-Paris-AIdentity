@@ -1,0 +1,104 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Agent Dashboard — Payments</title>
+    <link rel="stylesheet" href="/styles.css" />
+  </head>
+  <body>
+    <header class="topbar">
+      <div class="brand">🤖 Agent Identity Hub</div>
+      <div class="agent-picker">
+        <label for="agentSelect">Agent</label>
+        <select id="agentSelect"></select>
+      </div>
+    </header>
+
+    <nav class="tabs">
+      <button class="tab" data-tab="identity">Identity</button>
+      <button class="tab active" data-tab="payments">💳 Payments</button>
+    </nav>
+
+    <main>
+      <!-- Identity tab (owned by the hub — shown read-only for context) -->
+      <section id="tab-identity" class="tabpane">
+        <div class="card">
+          <h2>Agent Identity</h2>
+          <div id="identityInfo" class="kv"></div>
+        </div>
+      </section>
+
+      <!-- Payments tab (this module) -->
+      <section id="tab-payments" class="tabpane active">
+        <div class="grid">
+          <!-- Payment identity -->
+          <div class="card">
+            <div class="card-head">
+              <h2>Payment Identity</h2>
+              <button id="attachBtn" class="btn small">Attach</button>
+            </div>
+            <div id="paymentIdentity"></div>
+          </div>
+
+          <!-- Spending policy -->
+          <div class="card">
+            <h2>Spending Policy</h2>
+            <div id="policyView" class="kv"></div>
+          </div>
+        </div>
+
+        <!-- Natural-language request -->
+        <div class="card">
+          <h2>Ask in plain English <span class="muted">(natural-language → requestPurchase)</span></h2>
+          <form id="promptForm" class="form-row">
+            <input id="promptInput" name="prompt" placeholder='e.g. "Buy £15 of OpenAI credits"' required />
+            <button class="btn" type="submit">Interpret &amp; request</button>
+          </form>
+          <div id="promptResult" class="result"></div>
+        </div>
+
+        <!-- New request (demo helper — stands in for the agent tool call) -->
+        <div class="card">
+          <h2>New Purchase Request <span class="muted">(structured agent tool call)</span></h2>
+          <form id="requestForm" class="form-row">
+            <input name="merchant_name" placeholder="Merchant (e.g. OpenAI)" required />
+            <input name="amount" type="number" step="0.01" placeholder="Amount" required />
+            <input name="currency" value="GBP" size="4" required />
+            <input name="purpose" placeholder="Purpose" required />
+            <button class="btn" type="submit">requestPurchase()</button>
+          </form>
+          <div id="requestResult" class="result"></div>
+        </div>
+
+        <!-- Purchase requests -->
+        <div class="card">
+          <h2>Purchase Requests</h2>
+          <table id="requestsTable">
+            <thead>
+              <tr>
+                <th>Merchant</th><th>Amount</th><th>Status</th><th>Reason</th><th>Actions</th>
+              </tr>
+            </thead>
+            <tbody></tbody>
+          </table>
+        </div>
+
+        <!-- Transactions -->
+        <div class="card">
+          <h2>Transactions</h2>
+          <table id="txnTable">
+            <thead>
+              <tr>
+                <th>Merchant</th><th>Amount</th><th>Status</th><th>Provider txn</th><th>Time</th>
+              </tr>
+            </thead>
+            <tbody></tbody>
+          </table>
+        </div>
+      </section>
+    </main>
+
+    <script src="/app.js"></script>
+  </body>
+</html>

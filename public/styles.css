@@ -1,0 +1,65 @@
+* { box-sizing: border-box; }
+body {
+  margin: 0;
+  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+  color: #1f2330;
+  background: #f4f5f8;
+}
+.topbar {
+  display: flex; justify-content: space-between; align-items: center;
+  padding: 14px 24px; background: #11141d; color: #fff;
+}
+.brand { font-weight: 700; font-size: 18px; }
+.agent-picker label { font-size: 13px; opacity: .7; margin-right: 8px; }
+.agent-picker select {
+  padding: 6px 10px; border-radius: 8px; border: 1px solid #333; background: #1c2030; color: #fff;
+}
+.tabs { display: flex; gap: 4px; padding: 0 24px; background: #11141d; }
+.tab {
+  background: none; border: none; color: #9aa3b2; padding: 12px 16px; cursor: pointer;
+  font-size: 14px; border-bottom: 3px solid transparent;
+}
+.tab.active { color: #fff; border-bottom-color: #5b8cff; }
+main { padding: 24px; max-width: 1100px; margin: 0 auto; }
+.tabpane { display: none; }
+.tabpane.active { display: block; }
+.grid { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; }
+@media (max-width: 800px) { .grid { grid-template-columns: 1fr; } }
+.card {
+  background: #fff; border: 1px solid #e6e8ef; border-radius: 14px;
+  padding: 18px 20px; margin-bottom: 16px;
+}
+.card-head { display: flex; justify-content: space-between; align-items: center; }
+h2 { font-size: 15px; margin: 0 0 12px; }
+.muted { color: #8a90a0; font-weight: 400; font-size: 12px; }
+.kv { display: grid; grid-template-columns: auto 1fr; gap: 6px 16px; font-size: 14px; }
+.kv .k { color: #8a90a0; }
+.kv .v { font-weight: 600; }
+table { width: 100%; border-collapse: collapse; font-size: 14px; }
+th { text-align: left; color: #8a90a0; font-weight: 600; font-size: 12px; padding: 6px 8px; }
+td { padding: 8px; border-top: 1px solid #eef0f5; vertical-align: middle; }
+.badge {
+  display: inline-block; padding: 2px 9px; border-radius: 20px; font-size: 12px; font-weight: 600;
+}
+.badge.approved, .badge.executed, .badge.successful, .badge.active { background: #e3f6e9; color: #1c8a4d; }
+.badge.requires_approval, .badge.pending, .badge.paused { background: #fff3da; color: #a9760a; }
+.badge.rejected, .badge.failed, .badge.declined, .badge.disabled { background: #fde4e4; color: #c23434; }
+.btn {
+  background: #5b8cff; color: #fff; border: none; padding: 9px 14px; border-radius: 9px;
+  cursor: pointer; font-size: 14px; font-weight: 600;
+}
+.btn:hover { background: #467aff; }
+.btn.small { padding: 5px 10px; font-size: 12px; }
+.btn.ghost { background: #eef1f8; color: #2c3346; }
+.btn.danger { background: #ec5b5b; }
+.btn.danger:hover { background: #d94747; }
+.btn.success { background: #2bb86a; }
+.form-row { display: flex; gap: 8px; flex-wrap: wrap; align-items: center; }
+.form-row input { padding: 9px 11px; border: 1px solid #d8dbe6; border-radius: 9px; font-size: 14px; }
+.form-row input[name="merchant_name"], .form-row input[name="purpose"] { flex: 1; min-width: 140px; }
+.result { margin-top: 12px; font-size: 13px; }
+.result pre {
+  background: #0e1118; color: #d6e0ff; padding: 12px; border-radius: 9px; overflow-x: auto; margin: 0;
+}
+.empty { color: #a0a6b4; font-size: 13px; padding: 8px; }
+.row-actions { display: flex; gap: 6px; }
