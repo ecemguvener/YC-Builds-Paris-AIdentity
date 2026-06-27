@@ -424,11 +424,13 @@ export async function draftEmail(prompt: string, senderName: string, config: App
 
 async function draftWithOpenAI(prompt: string, senderName: string, config: AppConfig): Promise<GeneratedEmail> {
   const instructions =
-    "You draft a short, professional email on behalf of an AI assistant. " +
-    `The sender is "${senderName}", an assistant. ` +
+    "You draft an email on behalf of a sender based on the user's instruction. " +
+    `The sender is "${senderName}". ` +
+    "Mirror the tone, register, and intent of the user's instruction in the email: if the instruction is blunt, be blunt; if casual, casual; if urgent or firm, keep that edge; if formal, formal; if warm, warm. " +
+    "Do NOT sanitize, soften, over-formalize, or add pleasantries, hedging, apologies, or filler the user did not imply. Keep it concise and say exactly what the instruction wants said. " +
     "From the user's instruction, extract the recipient's email address into `to` if one is present (otherwise omit it), " +
-    "extract the recipient's name into `recipient_name` if present, write a concise `subject` (max 8 words), " +
-    "and write a polite plain-text `body` that opens with a greeting and ends with a sign-off as the assistant. " +
+    "extract the recipient's name into `recipient_name` if present, and write a `subject` (max 8 words) that fits the same tone. " +
+    "Write a plain-text `body`. Use a greeting and sign-off only if they fit the tone; when you sign off, sign as the sender. " +
     "Do not invent an email address.";
 
   const model = process.env.OPENAI_EMAIL_MODEL || "gpt-4o-mini";
@@ -555,8 +557,10 @@ function defaultBody(prompt: string, senderName: string, recipientName: string |
     .replace(/^\s*and\s+/i, "")
     .trim();
   const request = ask.charAt(0).toUpperCase() + ask.slice(1) || "I wanted to reach out.";
-  const greeting = recipientName ? `Hi ${recipientName},` : "Hi,";
-  return `${greeting}\n\n${request}\n\nBest,\n${senderName}`;
+  // Heuristic fallback (no LLM): carry the instruction directly rather than
+  // wrapping it in pleasantries. A greeting is only added when we know a name.
+  const greeting = recipientName ? `${recipientName},\n\n` : "";
+  return `${greeting}${request}\n\n— ${senderName}`;
 }
 
 function summarizeHeuristic(body: string): string {
