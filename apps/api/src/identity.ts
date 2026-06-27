@@ -36,6 +36,10 @@ const identitiesByToken = new Map<string, AgentIdentity>();
 const identitiesById = new Map<string, AgentIdentity>();
 const auditLogsByAgentId = new Map<string, AuditLogEntry[]>();
 
+const initRateLimitWindowMs = 60_000;
+const initRateLimitMaxPerWindow = 10;
+const initRateLimitBuckets = new Map<string, { windowStartedAt: number; count: number }>();
+
 const initIdentitySchema = z.object({
   agent_name: z.string().min(1).max(80),
   agent_runtime: z.string().min(1).max(80).default("openclaw"),
@@ -70,6 +74,18 @@ const calendarBookSchema = z.object({
 
 export function registerIdentityRoutes(app: FastifyInstance, config: AppConfig) {
   app.post("/api/identity/init", async (request, reply) => {
+    const clientIp = request.ip ?? "unknown";
+    const now = Date.now();
+    const bucket = initRateLimitBuckets.get(clientIp);
+    if (!bucket || now - bucket.windowStartedAt >= initRateLimitWindowMs) {
+      initRateLimitBuckets.set(clientIp, { windowStartedAt: now, count: 1 });
+    } else {
+      bucket.count += 1;
+      if (bucket.count > initRateLimitMaxPerWindow) {
+        return reply.code(429).header("retry-after", "60").send({ error: "too many identity creation requests" });
+      }
+    }
+
     const payload = initIdentitySchema.parse(request.body ?? {});
     const id = `agent_${slugify(payload.agent_name)}_${randomId(8)}`;
     const token = `identity_live_${randomId(32)}`;

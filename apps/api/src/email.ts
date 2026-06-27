@@ -749,18 +749,19 @@ export function registerEmailRoutes(app: FastifyInstance, config: AppConfig) {
   });
 
   // Inbound provider webhook (Resend). No Bearer token — verified by the Svix
-  // signature when EMAIL_WEBHOOK_SECRET is configured. Always 200 so the
-  // provider does not retry on unmatched recipients.
+  // signature when EMAIL_WEBHOOK_SECRET is configured. Rejects all requests
+  // when no secret is set to prevent unauthenticated ingestion.
   app.post("/api/webhooks/email/inbound", async (request, reply) => {
     const secret = config.EMAIL_WEBHOOK_SECRET;
-    if (secret) {
-      const rawBody = (request as { rawBody?: string }).rawBody ?? JSON.stringify(request.body ?? {});
-      const ok = secret.startsWith("whsec_")
-        ? verifyResendSignature(secret, request.headers as Record<string, unknown>, rawBody)
-        : request.headers["x-webhook-secret"] === secret;
-      if (!ok) {
-        return reply.code(401).send({ error: "invalid webhook signature" });
-      }
+    if (!secret) {
+      return reply.code(403).send({ error: "webhook signature verification is not configured" });
+    }
+    const rawBody = (request as { rawBody?: string }).rawBody ?? JSON.stringify(request.body ?? {});
+    const ok = secret.startsWith("whsec_")
+      ? verifyResendSignature(secret, request.headers as Record<string, unknown>, rawBody)
+      : request.headers["x-webhook-secret"] === secret;
+    if (!ok) {
+      return reply.code(401).send({ error: "invalid webhook signature" });
     }
     const notification = await ingestInboundReply(normalizeInbound(request.body), config);
     return reply.code(200).send({ ok: true, matched: Boolean(notification), notification: notification ? serializeNotification(notification) : null });

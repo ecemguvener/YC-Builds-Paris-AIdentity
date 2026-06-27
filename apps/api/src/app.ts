@@ -46,6 +46,14 @@ export async function buildApp(config: AppConfig, collections: Collections) {
     }
   });
 
+  app.addHook("onSend", async (_request, reply) => {
+    reply.header("x-content-type-options", "nosniff");
+    reply.header("x-frame-options", "DENY");
+    if (config.NODE_ENV === "production") {
+      reply.header("strict-transport-security", "max-age=63072000; includeSubDomains");
+    }
+  });
+
   app.addHook("preHandler", async (request, reply) => {
     const origin = request.headers.origin;
     if (

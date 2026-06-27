@@ -44,6 +44,10 @@ const environmentSchema = z.object({
   // still records the originally-intended recipient.
   EMAIL_SANDBOX_REDIRECT_TO: optionalNonEmptyStringSchema
 }).transform((environment) => {
+  if (environment.NODE_ENV === "production" && environment.SESSION_SECRET === "dev-barkan-session-secret-change-me") {
+    throw new Error("SESSION_SECRET must be changed from the default value in production.");
+  }
+
   return {
     ...environment,
     MONGODB_URI: normalizeMongoUriForEnvironment(
