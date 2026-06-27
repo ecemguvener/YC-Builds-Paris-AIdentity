@@ -6,6 +6,7 @@ import { requireAuth } from "./auth.js";
 import { buildTrustedDashboardCorsHeaders } from "./cors.js";
 import { buildOpenAIEndpointUrl } from "./openai.js";
 import { createPurchaseFromPrompt, formatPurchaseAmount, PaymentError, provisionPaymentIdentity } from "./payments.js";
+import { EmailError, sendSiteEmailFromText } from "./email.js";
 
 const DASHBOARD_CHAT_MODEL = "gpt-5.4-mini-2026-03-17";
 const dashboardChatMessageSchema = z.object({
@@ -65,6 +66,14 @@ export function registerDashboardChatRoutes(app: FastifyInstance, collections: C
     const latestUserMessage = [...payload.messages].reverse().find((message) => message.role === "user");
     if (latestUserMessage && isPurchaseIntent(latestUserMessage.content)) {
       const message = await runChatPurchase(latestUserMessage.content, sites, config);
+      streamChatMessage(request, reply, config, message);
+      return;
+    }
+
+    // If the latest message is an email instruction, drive the email tool and
+    // stream a confirmation instead of a normal chat reply.
+    if (latestUserMessage && isEmailIntent(latestUserMessage.content)) {
+      const message = await runChatEmail(latestUserMessage.content, sites, config);
       streamChatMessage(request, reply, config, message);
       return;
     }
@@ -227,6 +236,33 @@ async function runChatPurchase(
   } catch (error) {
     if (error instanceof PaymentError) {
       return `I couldn't complete that purchase: ${error.message}`;
+    }
+    throw error;
+  }
+}
+
+function isEmailIntent(text: string): boolean {
+  return /\be-?mail\b/i.test(text) && /\b(ask|tell|send|reply|write|invite|follow up|let .* know|about|to)\b/i.test(text);
+}
+
+async function runChatEmail(text: string, sites: SiteDocument[], config: AppConfig): Promise<string> {
+  const site = resolvePurchaseSite(text, sites);
+  if (!site) {
+    return "You don't have an agent identity yet. Create one first, then I can send email on its behalf.";
+  }
+
+  const accountId = site._id.toHexString();
+  try {
+    const { message, parsed } = await sendSiteEmailFromText(accountId, site.name, text, config);
+    const draftedBy = parsed?.parsedBy === "openai" ? "" : " _(templated draft)_";
+    const quotedBody = message.body.split("\n").join("\n> ");
+    const header = `✉️ **Email ${message.status === "sent" ? "sent" : "failed"}** from **${site.name}** (\`${message.fromEmail}\`)`;
+    return `${header}\n\n**To:** ${message.toEmail}\n**Subject:** ${message.subject}${draftedBy}\n\n> ${quotedBody}\n\nSee the **Email** tab on **${site.name}** for the full activity log.`;
+  } catch (error) {
+    if (error instanceof EmailError) {
+      return error.status === 422
+        ? `I drafted that email but couldn't find a recipient address. Tell me who to send it to (include their email), e.g. "email sarah@acme.com and ask…".`
+        : `I couldn't send that email: ${error.message}`;
     }
     throw error;
   }

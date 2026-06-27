@@ -1,7 +1,8 @@
+import crypto from "node:crypto";
 import Fastify from "fastify";
 import { describe, expect, it } from "vitest";
 import type { AppConfig } from "./config.js";
-import { registerEmailRoutes, extractEmail } from "./email.js";
+import { registerEmailRoutes, extractEmail, normalizeInbound, verifyResendSignature } from "./email.js";
 import { registerIdentityRoutes } from "./identity.js";
 
 // Minimal config: no RESEND_API_KEY and no OPENAI_API_KEY, so the capability
@@ -39,6 +40,66 @@ describe("extractEmail", () => {
   });
   it("returns null when there is no address", () => {
     expect(extractEmail("Email John about the demo")).toBeNull();
+  });
+});
+
+describe("normalizeInbound", () => {
+  it("normalizes a flat payload", () => {
+    const result = normalizeInbound({ from: "John <john@example.com>", to: "ava@aidentity.space", subject: "Re: Hi", text: "Yes." });
+    expect(result.from).toBe("john@example.com");
+    expect(result.toCandidates).toEqual(["ava@aidentity.space"]);
+    expect(result.subject).toBe("Re: Hi");
+  });
+
+  it("unwraps Resend's { data } envelope, array recipients, and header fields", () => {
+    const result = normalizeInbound({
+      type: "inbound.email",
+      data: {
+        from: { address: "john@example.com", name: "John" },
+        to: [{ address: "ava@aidentity.space" }, { address: "cc@example.com" }],
+        subject: "Re: Meeting",
+        html: "<p>Sounds good</p>",
+        headers: [{ name: "In-Reply-To", value: "<msg-1@x>" }, { name: "Message-Id", value: "<msg-2@y>" }]
+      }
+    });
+    expect(result.from).toBe("john@example.com");
+    expect(result.toCandidates).toContain("ava@aidentity.space");
+    expect(result.text).toBe("Sounds good");
+    expect(result.inReplyTo).toBe("<msg-1@x>");
+    expect(result.messageId).toBe("<msg-2@y>");
+  });
+});
+
+describe("verifyResendSignature (Svix)", () => {
+  const secret = `whsec_${Buffer.from("super-secret-signing-key").toString("base64")}`;
+
+  function sign(id: string, timestamp: string, body: string): string {
+    const key = Buffer.from(secret.slice("whsec_".length), "base64");
+    const sig = crypto.createHmac("sha256", key).update(`${id}.${timestamp}.${body}`).digest("base64");
+    return `v1,${sig}`;
+  }
+
+  it("accepts a correctly signed, fresh payload", () => {
+    const body = JSON.stringify({ hello: "world" });
+    const id = "msg_123";
+    const timestamp = String(Math.floor(Date.now() / 1000));
+    const headers = { "svix-id": id, "svix-timestamp": timestamp, "svix-signature": sign(id, timestamp, body) };
+    expect(verifyResendSignature(secret, headers, body)).toBe(true);
+  });
+
+  it("rejects a tampered body", () => {
+    const id = "msg_123";
+    const timestamp = String(Math.floor(Date.now() / 1000));
+    const headers = { "svix-id": id, "svix-timestamp": timestamp, "svix-signature": sign(id, timestamp, "{}") };
+    expect(verifyResendSignature(secret, headers, JSON.stringify({ hello: "world" }))).toBe(false);
+  });
+
+  it("rejects a stale timestamp", () => {
+    const body = "{}";
+    const id = "msg_123";
+    const timestamp = String(Math.floor(Date.now() / 1000) - 4000);
+    const headers = { "svix-id": id, "svix-timestamp": timestamp, "svix-signature": sign(id, timestamp, body) };
+    expect(verifyResendSignature(secret, headers, body)).toBe(false);
   });
 });
 

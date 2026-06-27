@@ -390,7 +390,25 @@ export const api = {
     apiRequest<PaymentTransaction>(`/api/sites/${siteId}/payments/${requestId}/execute`, {
       method: "POST",
       headers: { "idempotency-key": `ui:${requestId}` }
-    })
+    }),
+
+  // --- Email tool (per agent identity / site, authenticated by the session) ---
+  getSiteEmailActivity: (siteId: string) =>
+    apiRequest<EmailActivity>(`/api/sites/${siteId}/email-activity`),
+  siteRequestEmailFromText: (siteId: string, request: string, to?: string) =>
+    apiRequest<EmailSendResult & { parsed: ParsedEmail | null }>(`/api/sites/${siteId}/email/request`, {
+      method: "POST",
+      body: JSON.stringify(to ? { request, to } : { request })
+    }),
+  siteSendEmail: (siteId: string, input: EmailSendInput) =>
+    apiRequest<EmailSendResult>(`/api/sites/${siteId}/email/send`, {
+      method: "POST",
+      body: JSON.stringify(input)
+    }),
+  sitePauseEmail: (siteId: string) =>
+    apiRequest<EmailIdentityView>(`/api/sites/${siteId}/email/pause`, { method: "POST" }),
+  siteResumeEmail: (siteId: string) =>
+    apiRequest<EmailIdentityView>(`/api/sites/${siteId}/email/resume`, { method: "POST" })
 };
 
 export type PurchaseStatus = "pending" | "approved" | "requires_approval" | "rejected" | "executed" | "failed";
@@ -465,6 +483,73 @@ export interface PaymentActivity {
   policy: PaymentPolicyView | null;
   purchase_requests: PaymentRequestView[];
   transactions: PaymentTransaction[];
+}
+
+export interface EmailIdentityView {
+  email_identity_id: string;
+  email_address: string;
+  display_name: string;
+  provider: string;
+  status: "active" | "paused";
+  created_at: string;
+}
+
+export interface ParsedEmail {
+  to: string | null;
+  recipient_name: string | null;
+  subject: string;
+  body: string;
+  parsed_by: "openai" | "heuristic";
+}
+
+export interface EmailSendInput {
+  to: string;
+  subject: string;
+  body: string;
+}
+
+export interface EmailSendResult {
+  ok: boolean;
+  message_id: string;
+  thread_id: string;
+  provider_message_id: string | null;
+  from: string;
+  to: string;
+  subject: string;
+  status: "sent" | "failed" | "received";
+}
+
+export interface EmailMessageView {
+  id: string;
+  thread_id: string;
+  direction: "outbound" | "inbound";
+  from_email: string;
+  to_email: string;
+  subject: string;
+  body: string;
+  provider_message_id: string | null;
+  status: "sent" | "failed" | "received";
+  parsed_by: string | null;
+  created_at: string;
+}
+
+export interface EmailReplyNotificationView {
+  id: string;
+  email_message_id: string;
+  thread_id: string;
+  from_email: string;
+  subject: string;
+  summary: string;
+  suggested_reply: string;
+  status: "unread" | "read";
+  created_at: string;
+}
+
+export interface EmailActivity {
+  account_id: string;
+  email_identity: EmailIdentityView | null;
+  messages: EmailMessageView[];
+  reply_notifications: EmailReplyNotificationView[];
 }
 
 async function streamDashboardChatMessage(

@@ -1,24 +1,29 @@
 import crypto from "node:crypto";
+import { ObjectId } from "mongodb";
 import type { FastifyInstance, FastifyReply, FastifyRequest } from "fastify";
 import { z } from "zod";
 import type { AppConfig } from "./config.js";
+import type { Collections } from "./db.js";
+import { requireAuth } from "./auth.js";
 import { getAgentIdentityByToken, recordIdentityAudit, type AgentIdentity } from "./identity.js";
 
 // ---------------------------------------------------------------------------
 // Email Capability Add-on
 //
 // A plug-in communication layer that lets an existing agent identity send and
-// receive *real* email as a personal assistant. The brain (the existing agent)
-// calls these tools; this module owns the email identity, sending, inbound
-// reply matching, summaries, and the activity log.
+// receive *real* email as a personal assistant. The existing agent is the
+// brain; this exposes tools it calls.
 //
-// It mirrors the payments capability: in-memory stores keyed by the agent
-// identity id, Bearer identity-token auth, and audit entries written to the
-// shared identity audit log via recordIdentityAudit().
+// Like payments, the store is keyed by an opaque account id so one engine
+// serves two front doors:
+//   - agent-facing routes, authenticated with a Bearer identity token
+//     (account = the in-memory agent identity id)
+//   - dashboard routes, authenticated with the owner's session, scoped per
+//     agent identity (account = the site id the dashboard manages)
 //
-// Provider: Resend when RESEND_API_KEY is configured, otherwise a mock sender
-// (logs + synthetic message id) so the whole flow is demoable without a
-// verified sending domain.
+// Provider: Resend when RESEND_API_KEY is set, otherwise a mock sender (logs +
+// synthetic id) so the whole request -> send -> reply flow is demoable without
+// a verified sending domain.
 // ---------------------------------------------------------------------------
 
 type Provider = "resend" | "mock";
@@ -29,7 +34,7 @@ type NotificationStatus = "unread" | "read";
 
 interface EmailIdentity {
   id: string;
-  accountId: string; // the agent identity id
+  accountId: string;
   emailAddress: string;
   displayName: string;
   provider: Provider;
@@ -102,23 +107,13 @@ const requestSchema = z.object({
   approved: z.boolean().optional()
 });
 
-const inboundSchema = z.object({
-  from: z.string().min(3).max(320),
-  to: z.string().min(3).max(320),
-  subject: z.string().max(300).optional(),
-  text: z.string().max(50_000).optional(),
-  html: z.string().max(200_000).optional(),
-  in_reply_to: z.string().max(998).optional(),
-  message_id: z.string().max(998).optional()
-});
-
 // ---------------------------------------------------------------------------
 // Provisioning + lookups
 // ---------------------------------------------------------------------------
 
 /**
- * Attach an email identity to an agent. Called lazily from identity init when
- * the agent's tools include "email" (the address is already minted there).
+ * Attach an email identity to an account. The identity layer passes the address
+ * it already minted; the dashboard path mints one via ensureSiteEmailIdentity.
  */
 export function provisionEmailIdentity(accountId: string, emailAddress: string, displayName: string, config: AppConfig): EmailIdentity {
   const existing = emailIdentityByAccount.get(accountId);
@@ -140,6 +135,16 @@ export function provisionEmailIdentity(accountId: string, emailAddress: string, 
   return identity;
 }
 
+/** Lazy provisioning for dashboard-scoped accounts (mints an address). */
+export function ensureSiteEmailIdentity(accountId: string, displayName: string, config: AppConfig): EmailIdentity {
+  const existing = emailIdentityByAccount.get(accountId);
+  if (existing) {
+    return existing;
+  }
+  const address = `${slugify(displayName)}-${randomId(4)}@${config.EMAIL_FROM_DOMAIN}`;
+  return provisionEmailIdentity(accountId, address, displayName, config);
+}
+
 export function getEmailIdentity(accountId: string): EmailIdentity | null {
   return emailIdentityByAccount.get(accountId) ?? null;
 }
@@ -155,7 +160,9 @@ export function setEmailIdentityStatus(accountId: string, status: EmailIdentityS
 }
 
 // ---------------------------------------------------------------------------
-// Core operations (shared by bearer routes and the webhook)
+// Core send (shared by every front door) — no permission gating here; callers
+// gate as appropriate (bearer routes via requireSendableIdentity, dashboard
+// routes implicitly via the owner's session).
 // ---------------------------------------------------------------------------
 
 export interface SendResult {
@@ -163,69 +170,68 @@ export interface SendResult {
   parsed?: GeneratedEmail;
 }
 
-/** Send an explicit email (recipient/subject/body already known). */
-export async function sendEmail(
-  identity: AgentIdentity,
-  input: { to: string; subject: string; body: string; approved?: boolean },
+async function performSend(
+  emailIdentity: EmailIdentity,
+  input: { to: string; subject: string; body: string },
   config: AppConfig,
   parsed?: GeneratedEmail
 ): Promise<EmailMessage> {
-  const emailIdentity = requireSendableIdentity(identity, input.approved);
-  const threadId = threadFor(identity.id, input.to);
+  const accountId = emailIdentity.accountId;
+  const threadId = threadFor(accountId, input.to);
   const from = formatFrom(emailIdentity);
 
-  let providerMessageId: string | null = null;
-  let status: MessageStatus = "sent";
   try {
     const result = await dispatchSend(config, { from, to: input.to, subject: input.subject, text: input.body });
-    providerMessageId = result.providerMessageId;
-  } catch (error) {
-    status = "failed";
-    recordIdentityAudit(identity.id, "email.send", "blocked", `Send to ${input.to} failed: ${(error as Error).message}`);
-    storeMessage({
-      accountId: identity.id,
+    const message = storeMessage({
+      accountId,
       threadId,
       direction: "outbound",
       fromEmail: emailIdentity.emailAddress,
       toEmail: input.to,
       subject: input.subject,
       body: input.body,
-      providerMessageId,
-      status,
+      providerMessageId: result.providerMessageId,
+      status: "sent",
       parsedBy: parsed?.parsedBy ?? null
     });
+    recordIdentityAudit(accountId, "email.send", "allowed", `Email sent to ${input.to}: ${input.subject}`);
+    return message;
+  } catch (error) {
+    storeMessage({
+      accountId,
+      threadId,
+      direction: "outbound",
+      fromEmail: emailIdentity.emailAddress,
+      toEmail: input.to,
+      subject: input.subject,
+      body: input.body,
+      providerMessageId: null,
+      status: "failed",
+      parsedBy: parsed?.parsedBy ?? null
+    });
+    recordIdentityAudit(accountId, "email.send", "blocked", `Send to ${input.to} failed: ${(error as Error).message}`);
     throw error instanceof EmailError ? error : new EmailError(502, `email provider error: ${(error as Error).message}`);
   }
-
-  const message = storeMessage({
-    accountId: identity.id,
-    threadId,
-    direction: "outbound",
-    fromEmail: emailIdentity.emailAddress,
-    toEmail: input.to,
-    subject: input.subject,
-    body: input.body,
-    providerMessageId,
-    status,
-    parsedBy: parsed?.parsedBy ?? null
-  });
-  recordIdentityAudit(identity.id, "email.send", "allowed", `Email sent to ${input.to}: ${input.subject}`);
-  return message;
 }
 
-/**
- * Turn a plain-English instruction ("Email Sarah and ask if she can send the
- * contract today") into a recipient/subject/body, then send it. Throws a 422
- * if no recipient email can be resolved so the brain can ask the user for one.
- */
+// --- Agent-facing (Bearer identity token) ----------------------------------
+
+export async function sendEmail(
+  identity: AgentIdentity,
+  input: { to: string; subject: string; body: string; approved?: boolean },
+  config: AppConfig
+): Promise<EmailMessage> {
+  const emailIdentity = requireSendableIdentity(identity, input.approved);
+  return performSend(emailIdentity, input, config);
+}
+
 export async function sendEmailFromRequest(
   identity: AgentIdentity,
   input: { request: string; to?: string; approved?: boolean },
   config: AppConfig
 ): Promise<SendResult> {
-  // Gate first so we don't spend an LLM call on a blocked/paused identity.
-  requireSendableIdentity(identity, input.approved);
-  const generated = await generateEmailFromText(input.request, identity, config);
+  const emailIdentity = requireSendableIdentity(identity, input.approved);
+  const generated = await draftEmail(input.request, emailIdentity.displayName, config);
   const to = input.to ?? generated.to ?? undefined;
   if (!to) {
     throw new EmailError(
@@ -233,53 +239,62 @@ export async function sendEmailFromRequest(
       `couldn't find a recipient email in: "${input.request}". Ask the user for the recipient's email address, then pass it as "to".`
     );
   }
-  const message = await sendEmail(identity, { to, subject: generated.subject, body: generated.body, approved: input.approved }, config, generated);
+  const message = await performSend(emailIdentity, { to, subject: generated.subject, body: generated.body }, config, generated);
   return { message, parsed: { ...generated, to } };
+}
+
+// --- Dashboard-facing (session, owner is the human approver) ----------------
+
+export async function sendSiteEmailFromText(accountId: string, displayName: string, prompt: string, config: AppConfig, to?: string): Promise<SendResult> {
+  const emailIdentity = ensureSiteEmailIdentity(accountId, displayName, config);
+  if (emailIdentity.status !== "active") {
+    throw new EmailError(403, "email identity is paused");
+  }
+  const generated = await draftEmail(prompt, emailIdentity.displayName, config);
+  const recipient = to ?? generated.to ?? undefined;
+  if (!recipient) {
+    throw new EmailError(422, `couldn't find a recipient email in: "${prompt}". Add the recipient's email address.`);
+  }
+  const message = await performSend(emailIdentity, { to: recipient, subject: generated.subject, body: generated.body }, config, generated);
+  return { message, parsed: { ...generated, to: recipient } };
+}
+
+export async function sendSiteEmail(accountId: string, displayName: string, input: { to: string; subject: string; body: string }, config: AppConfig): Promise<EmailMessage> {
+  const emailIdentity = ensureSiteEmailIdentity(accountId, displayName, config);
+  if (emailIdentity.status !== "active") {
+    throw new EmailError(403, "email identity is paused");
+  }
+  return performSend(emailIdentity, input, config);
 }
 
 export function getEmailActivity(accountId: string) {
   const identity = emailIdentityByAccount.get(accountId);
   return {
     account_id: accountId,
-    email_identity: identity
-      ? {
-          email_identity_id: identity.id,
-          email_address: identity.emailAddress,
-          display_name: identity.displayName,
-          provider: identity.provider,
-          status: identity.status,
-          created_at: identity.createdAt.toISOString()
-        }
-      : null,
+    email_identity: identity ? serializeIdentity(identity) : null,
     messages: (messagesByAccount.get(accountId) ?? []).map(serializeMessage),
     reply_notifications: (notificationsByAccount.get(accountId) ?? []).map(serializeNotification)
   };
 }
 
 /**
- * Ingest an inbound reply from the provider webhook: match it to the right
- * agent + thread, store it, summarize it, and raise a reply notification the
- * hub can surface to the user.
+ * Ingest an inbound reply: match it to the right agent + thread, store it,
+ * summarize it, and raise a reply notification the hub can surface.
  */
-export async function ingestInboundReply(
-  payload: z.infer<typeof inboundSchema>,
-  config: AppConfig
-): Promise<EmailReplyNotification | null> {
-  const recipient = extractAddress(payload.to);
-  const accountId = accountByAddress.get(recipient.toLowerCase());
+export async function ingestInboundReply(normalized: NormalizedInbound, config: AppConfig): Promise<EmailReplyNotification | null> {
+  const accountId = normalized.toCandidates.map((address) => accountByAddress.get(address.toLowerCase())).find(Boolean);
   if (!accountId) {
     return null; // not addressed to any known agent identity
   }
-  const sender = extractAddress(payload.from);
-  const body = (payload.text ?? stripHtml(payload.html ?? "")).trim();
-  const subject = payload.subject?.trim() || "(no subject)";
+  const sender = normalized.from;
+  const subject = normalized.subject || "(no subject)";
+  const body = normalized.text.trim();
 
-  // Thread: prefer the message the reply is in-reply-to, else the latest
-  // conversation with this counterparty, else a fresh thread.
-  const parent = payload.in_reply_to ? messageByProviderId.get(payload.in_reply_to) : undefined;
+  const parent = normalized.inReplyTo ? messageByProviderId.get(normalized.inReplyTo) : undefined;
   const threadId = parent?.threadId ?? threadByCounterparty.get(`${accountId}:${sender.toLowerCase()}`) ?? newThread();
   threadByCounterparty.set(`${accountId}:${sender.toLowerCase()}`, threadId);
 
+  const recipient = normalized.toCandidates.find((address) => accountByAddress.get(address.toLowerCase()) === accountId) ?? normalized.toCandidates[0]!;
   const message = storeMessage({
     accountId,
     threadId,
@@ -288,7 +303,7 @@ export async function ingestInboundReply(
     toEmail: recipient,
     subject,
     body,
-    providerMessageId: payload.message_id ?? null,
+    providerMessageId: normalized.messageId,
     status: "received",
     parsedBy: null
   });
@@ -384,22 +399,22 @@ const DRAFT_SCHEMA = {
   additionalProperties: false
 } as const;
 
-export async function generateEmailFromText(prompt: string, identity: AgentIdentity, config: AppConfig): Promise<GeneratedEmail> {
+export async function draftEmail(prompt: string, senderName: string, config: AppConfig): Promise<GeneratedEmail> {
   if (config.OPENAI_API_KEY) {
     try {
-      return await generateWithOpenAI(prompt, identity, config);
+      return await draftWithOpenAI(prompt, senderName, config);
     } catch (error) {
       // eslint-disable-next-line no-console
       console.warn("[email] OpenAI draft failed, using heuristic:", (error as Error).message);
     }
   }
-  return draftHeuristic(prompt, identity);
+  return draftHeuristic(prompt, senderName);
 }
 
-async function generateWithOpenAI(prompt: string, identity: AgentIdentity, config: AppConfig): Promise<GeneratedEmail> {
+async function draftWithOpenAI(prompt: string, senderName: string, config: AppConfig): Promise<GeneratedEmail> {
   const instructions =
     "You draft a short, professional email on behalf of an AI assistant. " +
-    `The sender is "${identity.name}", an assistant. ` +
+    `The sender is "${senderName}", an assistant. ` +
     "From the user's instruction, extract the recipient's email address into `to` if one is present (otherwise omit it), " +
     "extract the recipient's name into `recipient_name` if present, write a concise `subject` (max 8 words), " +
     "and write a polite plain-text `body` that opens with a greeting and ends with a sign-off as the assistant. " +
@@ -432,19 +447,19 @@ async function generateWithOpenAI(prompt: string, identity: AgentIdentity, confi
     to,
     recipientName: typeof raw.recipient_name === "string" ? raw.recipient_name.trim() || null : null,
     subject: String(raw.subject ?? "").trim() || defaultSubject(prompt),
-    body: String(raw.body ?? "").trim() || defaultBody(prompt, identity, null),
+    body: String(raw.body ?? "").trim() || defaultBody(prompt, senderName, null),
     parsedBy: "openai"
   };
 }
 
-function draftHeuristic(prompt: string, identity: AgentIdentity): GeneratedEmail {
+function draftHeuristic(prompt: string, senderName: string): GeneratedEmail {
   const to = extractEmail(prompt);
   const recipientName = extractRecipientName(prompt);
   return {
     to,
     recipientName,
     subject: defaultSubject(prompt),
-    body: defaultBody(prompt, identity, recipientName),
+    body: defaultBody(prompt, senderName, recipientName),
     parsedBy: "heuristic"
   };
 }
@@ -509,11 +524,6 @@ export function extractEmail(text: string): string | null {
   return text.match(EMAIL_RE)?.[0] ?? null;
 }
 
-function extractAddress(value: string): string {
-  // Accepts "Name <a@b.com>" or "a@b.com".
-  return extractEmail(value) ?? value.trim();
-}
-
 function extractRecipientName(prompt: string): string | null {
   const match = prompt.match(/\b(?:email|tell|ask|message|write to|reach out to|contact)\s+([A-Z][a-z]+)\b/);
   return match ? match[1]! : null;
@@ -527,7 +537,7 @@ function defaultSubject(prompt: string): string {
   return subject.length > 4 ? subject : "Quick question";
 }
 
-function defaultBody(prompt: string, identity: AgentIdentity, recipientName: string | null): string {
+function defaultBody(prompt: string, senderName: string, recipientName: string | null): string {
   const ask = prompt
     .replace(EMAIL_RE, "")
     .replace(/\b(?:email|message|write to|reach out to|contact)\s+[A-Z][a-z]+\b/, "")
@@ -535,7 +545,7 @@ function defaultBody(prompt: string, identity: AgentIdentity, recipientName: str
     .trim();
   const request = ask.charAt(0).toUpperCase() + ask.slice(1) || "I wanted to reach out.";
   const greeting = recipientName ? `Hi ${recipientName},` : "Hi,";
-  return `${greeting}\n\n${request}\n\nBest,\n${identity.name}`;
+  return `${greeting}\n\n${request}\n\nBest,\n${senderName}`;
 }
 
 function summarizeHeuristic(body: string): string {
@@ -560,6 +570,128 @@ function readOpenAIOutputText(responseText: string): string {
 }
 
 // ---------------------------------------------------------------------------
+// Inbound payload normalization — tolerant of Resend/SES inbound shapes.
+// ---------------------------------------------------------------------------
+
+export interface NormalizedInbound {
+  from: string;
+  toCandidates: string[];
+  subject: string;
+  text: string;
+  inReplyTo: string | null;
+  messageId: string | null;
+}
+
+export function normalizeInbound(body: unknown): NormalizedInbound {
+  const data = unwrapData(body);
+  const headers = readHeaders(data.headers);
+  const from = firstAddress(data.from) ?? "";
+  const toCandidates = collectAddresses(data.to);
+  const text = typeof data.text === "string" && data.text ? data.text : stripHtml(typeof data.html === "string" ? data.html : "");
+  return {
+    from,
+    toCandidates,
+    subject: typeof data.subject === "string" ? data.subject.trim() : "",
+    text,
+    inReplyTo: asString(data.in_reply_to) ?? headers["in-reply-to"] ?? null,
+    messageId: asString(data.message_id) ?? headers["message-id"] ?? null
+  };
+}
+
+function unwrapData(body: unknown): Record<string, unknown> {
+  if (body && typeof body === "object") {
+    const record = body as Record<string, unknown>;
+    if (record.data && typeof record.data === "object") {
+      return record.data as Record<string, unknown>;
+    }
+    return record;
+  }
+  return {};
+}
+
+function readHeaders(value: unknown): Record<string, string> {
+  const out: Record<string, string> = {};
+  if (Array.isArray(value)) {
+    for (const entry of value) {
+      if (entry && typeof entry === "object") {
+        const name = asString((entry as Record<string, unknown>).name);
+        const headerValue = asString((entry as Record<string, unknown>).value);
+        if (name && headerValue) out[name.toLowerCase()] = headerValue;
+      }
+    }
+  } else if (value && typeof value === "object") {
+    for (const [name, headerValue] of Object.entries(value as Record<string, unknown>)) {
+      const stringValue = asString(headerValue);
+      if (stringValue) out[name.toLowerCase()] = stringValue;
+    }
+  }
+  return out;
+}
+
+function collectAddresses(value: unknown): string[] {
+  const items = Array.isArray(value) ? value : [value];
+  return items.map(firstAddress).filter((address): address is string => Boolean(address));
+}
+
+function firstAddress(value: unknown): string | null {
+  if (typeof value === "string") {
+    return extractEmail(value) ?? (value.includes("@") ? value.trim() : null);
+  }
+  if (value && typeof value === "object") {
+    const record = value as Record<string, unknown>;
+    const candidate = asString(record.address) ?? asString(record.email);
+    if (candidate) return extractEmail(candidate) ?? candidate;
+  }
+  return null;
+}
+
+function asString(value: unknown): string | null {
+  return typeof value === "string" && value.trim() ? value.trim() : null;
+}
+
+// ---------------------------------------------------------------------------
+// Resend webhook signature verification (Svix). The signing secret looks like
+// `whsec_<base64>`. When EMAIL_WEBHOOK_SECRET is a plain string instead, a
+// simple X-Webhook-Secret header check is used (handy for local testing).
+// ---------------------------------------------------------------------------
+
+export function verifyResendSignature(secret: string, headers: Record<string, unknown>, rawBody: string): boolean {
+  const id = asString(headers["svix-id"]);
+  const timestamp = asString(headers["svix-timestamp"]);
+  const signatureHeader = asString(headers["svix-signature"]);
+  if (!id || !timestamp || !signatureHeader) {
+    return false;
+  }
+  const timestampSeconds = Number(timestamp);
+  if (!Number.isFinite(timestampSeconds) || Math.abs(Date.now() / 1000 - timestampSeconds) > 300) {
+    return false; // reject stale/replayed deliveries (5 minute tolerance)
+  }
+  const key = secret.startsWith("whsec_") ? secret.slice("whsec_".length) : secret;
+  let secretBytes: Buffer;
+  try {
+    secretBytes = Buffer.from(key, "base64");
+  } catch {
+    return false;
+  }
+  const signedContent = `${id}.${timestamp}.${rawBody}`;
+  const expected = crypto.createHmac("sha256", secretBytes).update(signedContent).digest("base64");
+  return signatureHeader.split(" ").some((part) => {
+    const commaIndex = part.indexOf(",");
+    const value = commaIndex === -1 ? part : part.slice(commaIndex + 1);
+    return timingSafeEqualStrings(value, expected);
+  });
+}
+
+function timingSafeEqualStrings(a: string, b: string): boolean {
+  const aBytes = Buffer.from(a);
+  const bBytes = Buffer.from(b);
+  if (aBytes.length !== bBytes.length) {
+    return false;
+  }
+  return crypto.timingSafeEqual(aBytes, bBytes);
+}
+
+// ---------------------------------------------------------------------------
 // Routes — agent-facing (Bearer identity token)
 // ---------------------------------------------------------------------------
 
@@ -578,10 +710,7 @@ export function registerEmailRoutes(app: FastifyInstance, config: AppConfig) {
     const identity = readBearerIdentity(request);
     if (!identity) return reply.code(401).send({ error: "missing or invalid identity token" });
     const payload = sendSchema.parse(request.body ?? {});
-    return runEmail(reply, async () => {
-      const message = await sendEmail(identity, payload, config);
-      return reply.code(201).send(serializeSend(message));
-    });
+    return runEmail(reply, async () => reply.code(201).send(serializeSend(await sendEmail(identity, payload, config))));
   });
 
   app.post("/api/tools/email/pause", async (request, reply) => {
@@ -604,19 +733,81 @@ export function registerEmailRoutes(app: FastifyInstance, config: AppConfig) {
     return getEmailActivity(agentId);
   });
 
-  // Inbound provider webhook (Resend). No Bearer token: verified by signature
-  // when EMAIL_WEBHOOK_SECRET is configured. Always 200 so the provider does
-  // not retry on unmatched recipients.
+  // Inbound provider webhook (Resend). No Bearer token — verified by the Svix
+  // signature when EMAIL_WEBHOOK_SECRET is configured. Always 200 so the
+  // provider does not retry on unmatched recipients.
   app.post("/api/webhooks/email/inbound", async (request, reply) => {
-    if (config.EMAIL_WEBHOOK_SECRET) {
-      const provided = request.headers["x-webhook-secret"];
-      if (provided !== config.EMAIL_WEBHOOK_SECRET) {
+    const secret = config.EMAIL_WEBHOOK_SECRET;
+    if (secret) {
+      const rawBody = (request as { rawBody?: string }).rawBody ?? JSON.stringify(request.body ?? {});
+      const ok = secret.startsWith("whsec_")
+        ? verifyResendSignature(secret, request.headers as Record<string, unknown>, rawBody)
+        : request.headers["x-webhook-secret"] === secret;
+      if (!ok) {
         return reply.code(401).send({ error: "invalid webhook signature" });
       }
     }
-    const payload = inboundSchema.parse(unwrapInbound(request.body));
-    const notification = await ingestInboundReply(payload, config);
+    const notification = await ingestInboundReply(normalizeInbound(request.body), config);
     return reply.code(200).send({ ok: true, matched: Boolean(notification), notification: notification ? serializeNotification(notification) : null });
+  });
+}
+
+// ---------------------------------------------------------------------------
+// Routes — dashboard, per agent identity (session + ownership), scoped by site
+// ---------------------------------------------------------------------------
+
+export function registerSiteEmailRoutes(app: FastifyInstance, collections: Collections, config: AppConfig) {
+  const resolveSite = async (request: FastifyRequest, reply: FastifyReply): Promise<{ accountId: string; name: string } | null> => {
+    const authContext = await requireAuth(request, reply, collections, config);
+    if (!authContext) return null;
+    const siteId = parseObjectId((request.params as { siteId: string }).siteId);
+    if (!siteId) {
+      reply.code(404).send({ error: "agent identity not found" });
+      return null;
+    }
+    const site = await collections.sites.findOne({ _id: siteId, ownerUserId: authContext.user._id });
+    if (!site) {
+      reply.code(404).send({ error: "agent identity not found" });
+      return null;
+    }
+    const accountId = site._id.toHexString();
+    ensureSiteEmailIdentity(accountId, site.name || "Assistant", config); // lazy provision on first touch
+    return { accountId, name: site.name || "Assistant" };
+  };
+
+  app.get("/api/sites/:siteId/email-activity", async (request, reply) => {
+    const site = await resolveSite(request, reply);
+    if (!site) return;
+    return getEmailActivity(site.accountId);
+  });
+
+  app.post("/api/sites/:siteId/email/request", async (request, reply) => {
+    const site = await resolveSite(request, reply);
+    if (!site) return;
+    const payload = requestSchema.parse(request.body ?? {});
+    return runEmail(reply, async () => {
+      const { message, parsed } = await sendSiteEmailFromText(site.accountId, site.name, payload.request, config, payload.to);
+      return reply.code(201).send({ ...serializeSend(message), parsed: parsed ? serializeParsed(parsed) : null });
+    });
+  });
+
+  app.post("/api/sites/:siteId/email/send", async (request, reply) => {
+    const site = await resolveSite(request, reply);
+    if (!site) return;
+    const payload = sendSchema.parse(request.body ?? {});
+    return runEmail(reply, async () => reply.code(201).send(serializeSend(await sendSiteEmail(site.accountId, site.name, payload, config))));
+  });
+
+  app.post("/api/sites/:siteId/email/pause", async (request, reply) => {
+    const site = await resolveSite(request, reply);
+    if (!site) return;
+    return runEmail(reply, () => serializeIdentity(setEmailIdentityStatus(site.accountId, "paused")));
+  });
+
+  app.post("/api/sites/:siteId/email/resume", async (request, reply) => {
+    const site = await resolveSite(request, reply);
+    if (!site) return;
+    return runEmail(reply, () => serializeIdentity(setEmailIdentityStatus(site.accountId, "active")));
   });
 }
 
@@ -684,14 +875,6 @@ function newThread(): string {
 
 function formatFrom(identity: EmailIdentity): string {
   return `${identity.displayName} <${identity.emailAddress}>`;
-}
-
-/** Resend inbound webhooks wrap the email under { type, data: {...} }. */
-function unwrapInbound(body: unknown): unknown {
-  if (body && typeof body === "object" && "data" in body && (body as { data?: unknown }).data) {
-    return (body as { data: unknown }).data;
-  }
-  return body;
 }
 
 function readBearerIdentity(request: FastifyRequest): AgentIdentity | null {
@@ -766,6 +949,15 @@ function serializeIdentity(identity: EmailIdentity) {
     status: identity.status,
     created_at: identity.createdAt.toISOString()
   };
+}
+
+function parseObjectId(value: string): ObjectId | null {
+  return ObjectId.isValid(value) ? new ObjectId(value) : null;
+}
+
+function slugify(value: string): string {
+  const slug = value.trim().toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-+|-+$/g, "");
+  return slug || "assistant";
 }
 
 function randomId(byteLength: number): string {

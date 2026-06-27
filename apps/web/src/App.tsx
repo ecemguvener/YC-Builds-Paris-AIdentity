@@ -33,6 +33,7 @@ import {
   type ToastNotificationInput
 } from "./components/ToastNotifications";
 import { PaymentsPanel } from "./components/PaymentsPanel";
+import { EmailPanel } from "./components/EmailPanel";
 import {
   api,
   type AtlasBackendInventoryDocument,
@@ -84,7 +85,7 @@ type DashboardChatMessage = {
     entries: Array<{ question: string; answer: string }>;
   };
 };
-type SiteDetailTab = "credentials" | "installation" | "documentation" | "theme" | "payments";
+type SiteDetailTab = "credentials" | "installation" | "documentation" | "theme" | "payments" | "email";
 type UserSettingsSection = "profile" | "security" | "notifications" | "billing";
 type DocumentationView = "frontend" | "backend";
 type PanelState = "active" | "hidden" | "incoming" | "outgoing";
@@ -294,7 +295,7 @@ function getSiteDetailRoute(path: string, search = ""): { siteId: string; tab: S
 
   const rawTab = new URLSearchParams(search).get("tab");
   const tab =
-    rawTab === "documentation" || rawTab === "installation" || rawTab === "theme" || rawTab === "payments"
+    rawTab === "documentation" || rawTab === "installation" || rawTab === "theme" || rawTab === "payments" || rawTab === "email"
       ? rawTab
       : "credentials";
 
@@ -3236,6 +3237,7 @@ function SiteSettingsCategoryIcon({
     | "documentation"
     | "theme"
     | "act-on-behalf"
+    | "email"
     | "automations"
     | "profile"
     | "security"
@@ -3315,6 +3317,14 @@ function SiteSettingsCategoryIcon({
     return (
       <svg className="site-detail-page__category-icon" viewBox="0 0 20 20" aria-hidden="true">
         <path d="M2.8 4.74c0-.76.84-1.22 1.48-.8l5.86 3.9c.55.37.55 1.18 0 1.54l-5.86 3.9a.96.96 0 0 1-1.48-.8V4.74Zm8.08 0c0-.76.85-1.22 1.48-.8l5.86 3.9c.55.37.55 1.18 0 1.54l-5.86 3.9a.96.96 0 0 1-1.48-.8V4.74Z" />
+      </svg>
+    );
+  }
+
+  if (icon === "email") {
+    return (
+      <svg className="site-detail-page__category-icon" viewBox="0 0 20 20" aria-hidden="true">
+        <path d="M2.5 5.5A1.5 1.5 0 0 1 4 4h12a1.5 1.5 0 0 1 1.5 1.5v9A1.5 1.5 0 0 1 16 16H4a1.5 1.5 0 0 1-1.5-1.5v-9Zm1.86-.1 5.64 4.02 5.64-4.02H4.36Zm11.14 1.1-5.07 3.61a1 1 0 0 1-1.16 0L4.2 6.5v8H15.8v-8Z" />
       </svg>
     );
   }
@@ -3788,6 +3798,19 @@ function SiteDetailOverlay({
               <span>Payments</span>
             </button>
             <button
+              className="site-detail-page__tab"
+              id="site-detail-email-tab"
+              type="button"
+              role="tab"
+              aria-label="Email"
+              aria-selected={activeTab === "email"}
+              aria-controls="site-detail-email-panel"
+              onClick={() => onTabChange("email")}
+            >
+              <SiteSettingsCategoryIcon icon="email" />
+              <span>Email</span>
+            </button>
+            <button
               className="site-detail-page__tab site-detail-page__tab--disabled"
               type="button"
               role="tab"
@@ -3811,6 +3834,8 @@ function SiteDetailOverlay({
         >
           {activeTab === "payments" ? (
             <PaymentsPanel siteId={site.id} siteName={site.name} />
+          ) : activeTab === "email" ? (
+            <EmailPanel siteId={site.id} siteName={site.name} />
           ) : activeTab === "credentials" ? (
             <>
               <header className="site-detail-page__header">

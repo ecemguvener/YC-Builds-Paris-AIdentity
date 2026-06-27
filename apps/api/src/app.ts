@@ -9,7 +9,7 @@ import { registerAtlasAgentBridge } from "./atlas/agent-bridge.js";
 import { registerAtlasRoutes } from "./atlas/routes.js";
 import { registerAuthRoutes } from "./auth.js";
 import { registerDashboardChatRoutes } from "./dashboard-chat.js";
-import { registerEmailRoutes } from "./email.js";
+import { registerEmailRoutes, registerSiteEmailRoutes } from "./email.js";
 import { registerIdentityRoutes } from "./identity.js";
 import { registerPaymentRoutes, registerSitePaymentRoutes } from "./payments.js";
 import { registerSiteRoutes } from "./sites.js";
@@ -21,6 +21,22 @@ export async function buildApp(config: AppConfig, collections: Collections) {
       level: config.NODE_ENV === "test" ? "silent" : "info"
     },
     bodyLimit: 8 * 1024 * 1024
+  });
+
+  // Keep the raw JSON body around so the email inbound webhook can verify the
+  // Resend (Svix) signature, which is computed over the exact bytes received.
+  app.addContentTypeParser("application/json", { parseAs: "string" }, (request, body, done) => {
+    (request as { rawBody?: string }).rawBody = typeof body === "string" ? body : "";
+    if (typeof body !== "string" || body.trim() === "") {
+      done(null, {});
+      return;
+    }
+    try {
+      done(null, JSON.parse(body));
+    } catch (error) {
+      (error as Error & { statusCode?: number }).statusCode = 400;
+      done(error as Error, undefined);
+    }
   });
 
   await app.register(cookie);
@@ -76,6 +92,7 @@ export async function buildApp(config: AppConfig, collections: Collections) {
   registerAuthRoutes(app, collections, config);
   registerDashboardChatRoutes(app, collections, config);
   registerEmailRoutes(app, config);
+  registerSiteEmailRoutes(app, collections, config);
   registerIdentityRoutes(app, config);
   registerPaymentRoutes(app, config);
   registerSitePaymentRoutes(app, collections, config);

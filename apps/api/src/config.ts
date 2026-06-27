@@ -32,7 +32,7 @@ const environmentSchema = z.object({
   // mock mode (it logs the message and returns a synthetic id) so the full flow
   // is demoable without a verified sending domain.
   RESEND_API_KEY: optionalNonEmptyStringSchema,
-  EMAIL_FROM_DOMAIN: z.string().min(1).default("agents.barkan.dev"),
+  EMAIL_FROM_DOMAIN: z.string().min(1).default("aidentity.space"),
   EMAIL_WEBHOOK_SECRET: optionalNonEmptyStringSchema
 }).transform((environment) => {
   return {
