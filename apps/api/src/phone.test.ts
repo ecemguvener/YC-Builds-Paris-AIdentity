@@ -73,13 +73,13 @@ describe("placeAgentPhoneCall", () => {
 
     expect(clientData?.type).toBe("conversation_initiation_client_data");
     expect(dynamicVariables?.call_opening).toBe(
-      "Hi, I'm calling on behalf of Maxence. I'm calling to book a barber appointment for tomorrow afternoon."
+      "Hi, I'm calling on behalf of Maxence. I'd like to book a barber appointment for tomorrow afternoon."
     );
     expect(dynamicVariables?.call_opening).not.toContain("AI assistant");
     expect(dynamicVariables?.call_opening).not.toContain("client");
-    expect(dynamicVariables?.call_guidance).toContain("Do not repeatedly ask for confirmation");
+    expect(dynamicVariables?.call_guidance).toContain("Be concise and direct");
     expect(dynamicVariables?.context).toContain("Ask for the first available haircut slot after 3pm.");
-    expect(dynamicVariables?.context).toContain("only confirm final details that affect the outcome");
+    expect(dynamicVariables?.context).toContain("only confirm the final details that affect the outcome");
     expect(dynamicVariables?.task).toContain("Book a barber appointment");
     expect(dynamicVariables?.recipient_name).toBe("Barber shop");
   });
@@ -108,7 +108,7 @@ describe("placeAgentPhoneCall", () => {
     };
 
     expect(requestBody.conversation_initiation_client_data?.dynamic_variables?.call_opening).toBe(
-      "Hi, I'm calling on behalf of Maxence. I'm calling to ask if we can move the appointment to tomorrow morning."
+      "Hi, I'm calling on behalf of Maxence. I wanted to check if we can move the appointment to tomorrow morning."
     );
   });
 
@@ -138,7 +138,7 @@ describe("placeAgentPhoneCall", () => {
 
     const callOpening = requestBody.conversation_initiation_client_data?.dynamic_variables?.call_opening;
     expect(callOpening).toBe(
-      "Hi, I'm calling on behalf of Maxence. I'm calling to propose a picnic this Sunday."
+      "Hi, I'm calling on behalf of Maxence. I'd like to propose a picnic this Sunday."
     );
     expect(callOpening).not.toContain("ask Alex to call");
     expect(callOpening).not.toContain("calling about call Alex");

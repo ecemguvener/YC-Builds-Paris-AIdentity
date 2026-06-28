@@ -1,7 +1,7 @@
 import type { AppConfig } from "./config.js";
 
 const callConversationGuidance =
-  "Call naturally and keep the conversation moving. Do not repeatedly ask for confirmation; only confirm final details that affect the outcome, like time, price, address, availability, or cancellation policy.";
+  "Be concise and direct. After the one-line introduction, state the request immediately and get straight to the point. Keep every turn short (a sentence or two), ask one thing at a time, and avoid filler, small talk, and repetition. Do not re-explain or repeatedly ask for confirmation; only confirm the final details that affect the outcome — time, price, address, availability, or cancellation policy. Once the goal is achieved or clearly cannot be, wrap up and end the call promptly.";
 
 export interface PhoneCallRequest {
   toNumber: string;
@@ -279,14 +279,14 @@ function buildNaturalRequest(task: string, recipientName: string | null | undefi
   }
 
   if (/^(can|could|would|is|are|do|does|did|will|has|have)\b/i.test(firstWord)) {
-    return punctuate(`I'm calling to ask if ${questionToStatement(request)}`);
+    return punctuate(`I wanted to check if ${questionToStatement(request)}`);
   }
 
   if (/^(ask|book|cancel|change|check|confirm|contact|find|get|invite|move|order|propose|request|reserve|schedule|see|tell|try|update)\b/i.test(firstWord)) {
-    return punctuate(`I'm calling to ${lowercaseFirst(request)}`);
+    return punctuate(`I'd like to ${lowercaseFirst(request)}`);
   }
 
-  return punctuate(`I'm calling about ${lowercaseFirst(request)}`);
+  return punctuate(`It's about ${lowercaseFirst(request)}`);
 }
 
 function stripOutboundCallWrapper(value: string, recipientName: string | null | undefined): string {
