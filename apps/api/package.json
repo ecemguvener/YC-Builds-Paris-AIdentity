@@ -9,6 +9,7 @@
     "start": "node dist/server.js",
     "seed:demo": "tsx src/seed-demo.ts",
     "amazon:login": "tsx src/amazon/login.ts",
+    "amazon:register": "tsx src/amazon/register.ts",
     "test": "vitest run"
   },
   "dependencies": {

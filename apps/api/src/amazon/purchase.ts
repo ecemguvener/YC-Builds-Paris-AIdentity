@@ -58,19 +58,108 @@ export async function captureAmazonLogin(config: AppConfig): Promise<void> {
   const browser = await chromium.launch({ headless: false });
   const context = await browser.newContext();
   const page = await context.newPage();
-  await page.goto(`${config.AMAZON_BASE_URL}/ap/signin`, { timeout: NAV_TIMEOUT }).catch(() => page.goto(config.AMAZON_BASE_URL));
+  await page.goto(`${config.AMAZON_BASE_URL}/ap/signin`, { timeout: NAV_TIMEOUT }).catch(() => page.goto(config.AMAZON_BASE_URL).catch(() => undefined));
   // eslint-disable-next-line no-console
   console.log("\n[amazon:login] A browser opened. Sign in to Amazon (handle any 2FA/CAPTCHA).");
   // eslint-disable-next-line no-console
-  console.log("[amazon:login] Once you're on the Amazon home page logged in, come back here and press Enter.\n");
-  await new Promise<void>((resolve) => {
+  console.log("[amazon:login] It saves automatically once you're logged in — no need to come back here.\n");
+
+  // Resolve on EITHER: Amazon auth cookie appears (logged in), or stdin Enter.
+  const loggedIn = new Promise<void>((resolve) => {
+    const timer = setInterval(async () => {
+      try {
+        const cookies = await context.cookies();
+        if (cookies.some((c) => c.name === "at-main" || c.name === "sess-at-main")) {
+          clearInterval(timer);
+          resolve();
+        }
+      } catch {
+        /* keep polling */
+      }
+    }, 2000);
+    // Safety timeout: 8 minutes.
+    setTimeout(() => {
+      clearInterval(timer);
+      resolve();
+    }, 8 * 60 * 1000);
+  });
+  const manual = new Promise<void>((resolve) => {
     process.stdin.resume();
     process.stdin.once("data", () => resolve());
   });
+  await Promise.race([loggedIn, manual]);
+
   await context.storageState({ path: sessionFile(config) });
   await browser.close();
   // eslint-disable-next-line no-console
   console.log(`[amazon:login] Session saved to ${sessionFile(config)}`);
+}
+
+/**
+ * Create a NEW Amazon account for the agent. Opens the registration form,
+ * pre-fills the agent's name / email / password, then waits for you to complete
+ * the CAPTCHA + the verification code Amazon emails (the code must reach an
+ * inbox you can open). Auto-saves the session once the account exists.
+ *
+ * Credentials come from env: AMAZON_ACCOUNT_NAME, AMAZON_ACCOUNT_EMAIL,
+ * AMAZON_ACCOUNT_PASSWORD. They are never logged.
+ */
+export async function registerAmazonAccount(config: AppConfig): Promise<void> {
+  const name = process.env.AMAZON_ACCOUNT_NAME || "Aidentity Agent";
+  const email = process.env.AMAZON_ACCOUNT_EMAIL;
+  const password = process.env.AMAZON_ACCOUNT_PASSWORD;
+  if (!email || !password) {
+    throw new Error("Set AMAZON_ACCOUNT_EMAIL and AMAZON_ACCOUNT_PASSWORD (an inbox you can open for the verification code).");
+  }
+
+  const { chromium } = await import("playwright");
+  const browser = await chromium.launch({ headless: false });
+  const context = await browser.newContext();
+  const page = await context.newPage();
+  await page.goto(config.AMAZON_BASE_URL, { timeout: NAV_TIMEOUT }).catch(() => undefined);
+  // Homepage -> account menu -> Sign in page -> "Create your Amazon account".
+  await page.locator("#nav-link-accountList").click({ timeout: STEP_TIMEOUT }).catch(() => undefined);
+  await page.locator("#createAccountSubmit, a:has-text('Create your Amazon account')").first().click({ timeout: STEP_TIMEOUT }).catch(() => undefined);
+  // Pre-fill the registration form (selectors are best-effort).
+  await page.locator("#ap_customer_name, input[name='customerName']").first().fill(name).catch(() => undefined);
+  await page.locator("#ap_email, input[name='email']").first().fill(email).catch(() => undefined);
+  await page.locator("#ap_password, input[name='password']").first().fill(password).catch(() => undefined);
+  await page.locator("#ap_password_check, input[name='passwordCheck']").first().fill(password).catch(() => undefined);
+
+  // eslint-disable-next-line no-console
+  console.log("\n[amazon:register] A browser opened with the agent's details pre-filled.");
+  // eslint-disable-next-line no-console
+  console.log(`[amazon:register] Email: ${email}  (Amazon will send a verification code here — open this inbox.)`);
+  // eslint-disable-next-line no-console
+  console.log("[amazon:register] Click 'Create your Amazon account', solve any CAPTCHA, and enter the emailed code. It saves automatically when done.\n");
+
+  const created = new Promise<void>((resolve) => {
+    const timer = setInterval(async () => {
+      try {
+        const cookies = await context.cookies();
+        if (cookies.some((c) => c.name === "at-main" || c.name === "sess-at-main")) {
+          clearInterval(timer);
+          resolve();
+        }
+      } catch {
+        /* keep polling */
+      }
+    }, 2000);
+    setTimeout(() => {
+      clearInterval(timer);
+      resolve();
+    }, 10 * 60 * 1000);
+  });
+  const manual = new Promise<void>((resolve) => {
+    process.stdin.resume();
+    process.stdin.once("data", () => resolve());
+  });
+  await Promise.race([created, manual]);
+
+  await context.storageState({ path: sessionFile(config) });
+  await browser.close();
+  // eslint-disable-next-line no-console
+  console.log(`[amazon:register] Session saved to ${sessionFile(config)}`);
 }
 
 /**
