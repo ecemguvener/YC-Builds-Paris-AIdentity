@@ -1,6 +1,6 @@
 # aidentity.space
 
-aidentity.space gives an AI agent what it needs to act in the real world: a phone number, an email address, a payment card, and a calendar. One API call sets it all up. Every action the agent takes (a call, an email, a payment) runs through us, so there is a record of what it did and a limit on what it is allowed to do — a building block like Stripe or Twilio, except a single layer that covers all of them at once, with the guardrails built in.
+aidentity.space gives an AI agent what it needs to act in the real world scenarios: a phone number, an email address, a payment card, and a calendar. One API call sets everything up. Every action the agent takes (a call, an email, a payment) runs through us, so there is a record of what it did and a limit on what it is allowed to do.
 
 The agent stays the brain. aidentity.space is the identity + governance layer it plugs into.
 
