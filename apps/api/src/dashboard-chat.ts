@@ -15,7 +15,7 @@ const dashboardChatMessageSchema = z.object({
 });
 
 const dashboardChatRequestSchema = z.object({
-  messages: z.array(dashboardChatMessageSchema).min(1).max(24)
+  messages: z.array(dashboardChatMessageSchema).min(1).max(50)
 });
 
 const openAIResponsesEndpoint = "https://api.openai.com/v1/responses";
@@ -44,10 +44,9 @@ After a call completes, always reply with two parts:
 Mention when a call is simulated because ElevenLabs env vars are missing.
 
 Online orders:
-- When the user asks to buy/order/get a product or book, use the order_on_amazon tool. Defaults (Amazon UK, paperback, saved address, budget cap, saved card) are applied automatically.
-- ALWAYS review first: call order_on_amazon with approved=false, then show the user the item, price, and that it ships to the saved address. Ask them to confirm before buying.
-- Only after the user explicitly confirms (e.g. "yes", "place it"), call order_on_amazon with approved=true to place the real order, then report the order number.
-- If the result status is "blocked", tell the user why (e.g. over budget, or a verification wall) and do not place it. If "review", present it and ask for confirmation. Never claim an order was placed unless the tool returns status "placed".
+- When the user asks to buy/order/get a product or book, call the order_on_amazon tool right away with the item. Defaults (Amazon UK, paperback, saved address, budget cap, saved card) are applied automatically.
+- This tool PLACES the order immediately on the first request — do not ask for a separate confirmation. After it returns, report the item, price, and order number.
+- If the result status is "blocked", tell the user why (e.g. over the budget cap, or a verification wall) and that nothing was bought. Never claim an order was placed unless the tool returns status "placed".
 
 Style:
 - Be decisive and operational, like an agent executing the user's real-world request.
@@ -280,7 +279,7 @@ function buildOpenClawTools(includeWebSearch: boolean): Array<Record<string, unk
       type: "function",
       name: "order_on_amazon",
       description:
-        "Order a product (by default a paperback book) on Amazon UK using the agent's saved delivery address and card. ALWAYS call first with approved=false to get the order review (item, price, shipping) WITHOUT buying; show it to the user and ask them to confirm. Only call again with approved=true after the user explicitly confirms, to place the real order. Orders above the budget cap are blocked automatically.",
+        "Order AND place a product (by default a paperback book) on Amazon UK using the agent's saved delivery address and card. This places the real order immediately for the requested item — no separate confirmation step. Orders above the budget cap are blocked automatically and not placed.",
       parameters: {
         type: "object",
         additionalProperties: false,
@@ -288,13 +287,9 @@ function buildOpenClawTools(includeWebSearch: boolean): Array<Record<string, unk
           query: {
             type: "string",
             description: "What to buy — e.g. a book title. Marketplace and format defaults are applied automatically."
-          },
-          approved: {
-            type: "boolean",
-            description: "false = review only, never buys. true = place the real order; set true ONLY after the user explicitly confirms the reviewed item."
           }
         },
-        required: ["query", "approved"]
+        required: ["query"]
       },
       strict: true
     }
@@ -315,9 +310,9 @@ async function runOpenClawTool(
   if (functionCall.name === "order_on_amazon") {
     const parsed = parseFunctionArguments(functionCall.argumentsText);
     const query = readNonEmptyString(parsed.query) || "";
-    const approved = parsed.approved === true;
     try {
-      const order = await placeAmazonOrder(query, approved, config);
+      // Place the order immediately on the user's request (budget cap still gates it).
+      const order = await placeAmazonOrder(query, true, config);
       return { tool: functionCall.name, ...order };
     } catch (error) {
       return { ok: false, tool: functionCall.name, error: (error as Error).message };

@@ -2415,7 +2415,7 @@ function createDashboardChatMessage(role: DashboardChatRole, content: string): D
 }
 
 function toDashboardChatApiMessages(messages: DashboardChatMessage[]): DashboardChatMessageInput[] {
-  return messages.slice(-24).map((message) => ({
+  return messages.slice(-50).map((message) => ({
     role: message.role,
     content: message.content
   }));
