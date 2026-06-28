@@ -129,7 +129,7 @@ const agentIdentityCapabilities = [
   },
   {
     label: "Email",
-    value: "agent@identity.aidentity.dev",
+    value: "agent@aidentity.space",
     description: "Inbox and outbound email identity",
     Icon: Mail
   },
@@ -193,13 +193,13 @@ After installing the skill, call the link endpoint with the confirmation token s
 
 function buildIdentityReceipt(site: Site | null): string {
   const identityName = site?.name ?? "Agent identity";
-  const endpoint = site?.domain ?? "managed-openclaw.aidentity.dev";
+  const endpoint = site?.domain ?? "managed-openclaw.aidentity.space";
 
   return `Aidentity Agent Identity
 name=${identityName}
 openclaw=${endpoint}
 phone=+1-415-555-0198
-email=agent@identity.aidentity.dev
+email=agent@aidentity.space
 card=visa_4242
 calendar=managed`;
 }
@@ -3891,7 +3891,7 @@ function SiteOnboardingScreen({
 
     const normalizedEndpoint = openClawMode === "existing"
       ? domain.trim()
-      : `${slugifyIdentityName(name)}.managed-openclaw.aidentity.dev`;
+      : `${slugifyIdentityName(name)}.managed-openclaw.aidentity.space`;
 
     setDomain(normalizedEndpoint);
     setSubmittingStep("openclaw");
@@ -4182,7 +4182,7 @@ function SiteOnboardingScreen({
                         ) : (
                           <div className="site-onboarding-page__managed-note">
                             <Server size={16} aria-hidden="true" />
-                            <span>{`${slugifyIdentityName(name)}.managed-openclaw.aidentity.dev`}</span>
+                            <span>{`${slugifyIdentityName(name)}.managed-openclaw.aidentity.space`}</span>
                           </div>
                         )}
                       </div>

@@ -1,12 +1,12 @@
-# Barkan
+# aidentity.space
 
-Barkan is a web product for issuing real-world identities to AI agents. Each agent identity can be linked to an OpenClaw instance and provisioned with a phone number, email address, payment card, calendar, and other real-world tools.
+aidentity.space is a web product for issuing real-world identities to AI agents. Each agent identity can be linked to an OpenClaw instance and provisioned with a phone number, email address, payment card, calendar, and other real-world tools.
 
 The dashboard supports the current agent identity flow:
 
 - Create a new agent identity.
 - Choose an existing OpenClaw instance or a managed OpenClaw deployment.
-- Copy a prompt into OpenClaw so it can install the Barkan identity skill and confirm linking through a tokenized endpoint.
+- Copy a prompt into OpenClaw so it can install the aidentity.space identity skill and confirm linking through a tokenized endpoint.
 - Manage identity details, OpenClaw link tokens, dashboard chat, phone, email, and payment tools.
 
 The backend still keeps the original `sites` and `site-setups` route names internally for speed during the hackathon. The user-facing product language is agent identities.
