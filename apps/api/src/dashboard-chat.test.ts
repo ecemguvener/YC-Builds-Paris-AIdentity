@@ -25,9 +25,9 @@ describe("dashboard chat", () => {
     const sessionToken = "session_test";
     const user = createUser();
     const fetchMock = vi.fn<typeof fetch>().mockResolvedValueOnce(
-      new Response(openAIStreamText("Hello from Barkan."), {
+      new Response(JSON.stringify({ output_text: "Hello from Barkan." }), {
         status: 200,
-        headers: { "content-type": "text/event-stream" }
+        headers: { "content-type": "application/json" }
       })
     );
     vi.stubGlobal("fetch", fetchMock);
@@ -105,19 +105,6 @@ describe("dashboard chat", () => {
     await app.close();
   });
 });
-
-function openAIStreamText(text: string): ReadableStream<Uint8Array> {
-  const encoder = new TextEncoder();
-  return new ReadableStream({
-    start(controller) {
-      controller.enqueue(
-        encoder.encode(`data: ${JSON.stringify({ type: "response.output_text.delta", delta: text })}\n\n`)
-      );
-      controller.enqueue(encoder.encode("data: [DONE]\n\n"));
-      controller.close();
-    }
-  });
-}
 
 function createCollections({
   sessionToken,

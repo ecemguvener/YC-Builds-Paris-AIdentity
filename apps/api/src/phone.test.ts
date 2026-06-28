@@ -46,7 +46,7 @@ describe("placeAgentPhoneCall", () => {
     );
 
     await placeAgentPhoneCall({
-      toNumber: "+33757509222",
+      toNumber: "+33771594992",
       task: "Book a barber appointment for tomorrow afternoon.",
       agentIdentityName: "Maxence AI Caller",
       recipientName: "Barber shop",
