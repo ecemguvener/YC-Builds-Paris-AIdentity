@@ -31,6 +31,10 @@ const environmentSchema = z.object({
   OPENAI_ACTION_MODEL: z.string().min(1).default("gpt-5.4-2026-03-05").transform(normalizeConfiguredOpenAIModel),
   OPENAI_ATLAS_MODEL: z.string().min(1).default("gpt-5.4-2026-03-05").transform(normalizeConfiguredOpenAIModel),
   OPENAI_DASHBOARD_CHAT_MODEL: z.string().min(1).default("gpt-5.4-2026-03-05").transform(normalizeConfiguredOpenAIModel),
+  PAYMENT_PROVIDER: z.enum(["mock", "stripe"]).default("mock"),
+  STRIPE_SECRET_KEY: optionalNonEmptyStringSchema,
+  STRIPE_SUCCESS_URL: optionalNonEmptyStringSchema,
+  STRIPE_CANCEL_URL: optionalNonEmptyStringSchema,
   // Email capability add-on. When RESEND_API_KEY is unset the capability runs in
   // mock mode (it logs the message and returns a synthetic id) so the full flow
   // is demoable without a verified sending domain.

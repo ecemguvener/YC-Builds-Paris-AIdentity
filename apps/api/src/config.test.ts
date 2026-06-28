@@ -104,11 +104,27 @@ describe("loadConfig", () => {
   it("treats empty vendor API keys as unset", () => {
     process.env.OPENAI_API_KEY = "   ";
     process.env.ELEVENLABS_API_KEY = "";
+    process.env.STRIPE_SECRET_KEY = " ";
 
     const config = loadConfig();
 
     expect(config.OPENAI_API_KEY).toBeUndefined();
     expect(config.ELEVENLABS_API_KEY).toBeUndefined();
+    expect(config.STRIPE_SECRET_KEY).toBeUndefined();
+  });
+
+  it("loads Stripe payment provider settings", () => {
+    process.env.PAYMENT_PROVIDER = "stripe";
+    process.env.STRIPE_SECRET_KEY = "sk_test_config";
+    process.env.STRIPE_SUCCESS_URL = "https://example.com/success?request={REQUEST_ID}";
+    process.env.STRIPE_CANCEL_URL = "https://example.com/cancel";
+
+    const config = loadConfig();
+
+    expect(config.PAYMENT_PROVIDER).toBe("stripe");
+    expect(config.STRIPE_SECRET_KEY).toBe("sk_test_config");
+    expect(config.STRIPE_SUCCESS_URL).toBe("https://example.com/success?request={REQUEST_ID}");
+    expect(config.STRIPE_CANCEL_URL).toBe("https://example.com/cancel");
   });
 
 });

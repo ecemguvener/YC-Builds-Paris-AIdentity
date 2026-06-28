@@ -412,7 +412,7 @@ export const api = {
     apiRequest<EmailIdentityView>(`/api/sites/${siteId}/email/resume`, { method: "POST" })
 };
 
-export type PurchaseStatus = "pending" | "approved" | "requires_approval" | "rejected" | "executed" | "failed";
+export type PurchaseStatus = "pending" | "approved" | "requires_approval" | "rejected" | "payment_link_created" | "executed" | "failed";
 
 export interface PurchaseDecision {
   request_id: string;
@@ -470,10 +470,11 @@ export interface PaymentTransaction {
   purchase_request_id: string;
   provider: string;
   provider_transaction_id: string;
+  payment_url: string | null;
   merchant_name: string;
   amount: number;
   currency: string;
-  status: "successful" | "declined" | "failed";
+  status: "payment_link_created" | "successful" | "declined" | "failed";
   decision_reason: string;
   created_at: string;
 }

@@ -1,5 +1,11 @@
-import { describe, expect, it } from "vitest";
-import { evaluatePurchaseRequest } from "./payments.js";
+import { afterEach, describe, expect, it, vi } from "vitest";
+import type { AppConfig } from "./config.js";
+import {
+  createPurchaseRequest,
+  evaluatePurchaseRequest,
+  executeApprovedPurchase,
+  provisionPaymentIdentity
+} from "./payments.js";
 
 const basePolicy = {
   agentId: "agent_test",
@@ -14,6 +20,10 @@ const basePolicy = {
   createdAt: new Date(),
   updatedAt: new Date()
 };
+
+afterEach(() => {
+  vi.restoreAllMocks();
+});
 
 describe("evaluatePurchaseRequest", () => {
   it("auto-approves a small purchase within all limits", () => {
@@ -69,5 +79,73 @@ describe("evaluatePurchaseRequest", () => {
     expect(
       evaluatePurchaseRequest({ merchantName: "OpenAI", amount: 5, recurring: true }, basePolicy, 0, 0).status
     ).toBe("rejected");
+  });
+});
+
+describe("executeApprovedPurchase", () => {
+  it("creates mock payment links by default", async () => {
+    const accountId = `acct_mock_${Date.now()}`;
+    const identity = provisionPaymentIdentity(accountId);
+    const purchase = createPurchaseRequest(accountId, {
+      merchantName: "OpenAI",
+      amount: 5,
+      currency: "GBP",
+      purpose: "Buy API credits"
+    });
+
+    const transaction = await executeApprovedPurchase(accountId, purchase.id);
+
+    expect(identity.provider).toBe("mock");
+    expect(transaction.provider).toBe("mock");
+    expect(transaction.status).toBe("payment_link_created");
+    expect(transaction.providerTransactionId).toMatch(/^mock_txn_/);
+    expect(transaction.paymentUrl).toContain("https://pay.stripe.com/test/mock_");
+  });
+
+  it("fails loudly when Stripe is selected without a secret key", async () => {
+    const accountId = `acct_stripe_missing_${Date.now()}`;
+    const config = {
+      PAYMENT_PROVIDER: "stripe"
+    } as AppConfig;
+    const identity = provisionPaymentIdentity(accountId, config);
+    const purchase = createPurchaseRequest(accountId, {
+      merchantName: "OpenAI",
+      amount: 5,
+      currency: "GBP",
+      purpose: "Buy API credits"
+    });
+    await expect(executeApprovedPurchase(accountId, purchase.id, config)).rejects.toThrow("Stripe is not configured");
+    expect(identity.provider).toBe("stripe");
+  });
+
+  it("creates Stripe Checkout payment links when Stripe is configured", async () => {
+    const accountId = `acct_stripe_link_${Date.now()}`;
+    const config = {
+      PAYMENT_PROVIDER: "stripe",
+      STRIPE_SECRET_KEY: "sk_test_link",
+      PUBLIC_APP_URL: "https://dashboard.example.com"
+    } as AppConfig;
+    const fetchMock = vi.spyOn(globalThis, "fetch").mockResolvedValue(
+      new Response(JSON.stringify({ id: "cs_test_123", url: "https://checkout.stripe.com/c/pay/cs_test_123" }), {
+        status: 200,
+        headers: { "content-type": "application/json" }
+      })
+    );
+
+    provisionPaymentIdentity(accountId, config);
+    const purchase = createPurchaseRequest(accountId, {
+      merchantName: "OpenAI",
+      amount: 5,
+      currency: "GBP",
+      purpose: "Buy API credits"
+    });
+
+    const transaction = await executeApprovedPurchase(accountId, purchase.id, config, "test-idempotency-key");
+
+    expect(fetchMock).toHaveBeenCalledWith("https://api.stripe.com/v1/checkout/sessions", expect.objectContaining({ method: "POST" }));
+    expect(transaction.provider).toBe("stripe");
+    expect(transaction.providerTransactionId).toBe("cs_test_123");
+    expect(transaction.status).toBe("payment_link_created");
+    expect(transaction.paymentUrl).toBe("https://checkout.stripe.com/c/pay/cs_test_123");
   });
 });

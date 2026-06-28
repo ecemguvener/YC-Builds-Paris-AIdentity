@@ -65,7 +65,9 @@ export function PaymentsPanel({ siteId, siteName }: { siteId: string; siteName: 
         <div className="payments-card">
           <CreditCard size={18} aria-hidden="true" />
           <div>
-            <span className="payments-card__brand">Visa •••• {card?.card_last4 ?? "····"}</span>
+            <span className="payments-card__brand">
+              {card?.provider === "stripe" ? "Stripe Checkout links" : `Visa •••• ${card?.card_last4 ?? "····"}`}
+            </span>
             <span className="payments-card__meta">{card ? `${card.provider} · ${card.status}` : loading ? "loading…" : "no card"}</span>
           </div>
         </div>
@@ -140,7 +142,7 @@ export function PaymentsPanel({ siteId, siteName }: { siteId: string; siteName: 
                 <th>Merchant</th>
                 <th>Amount</th>
                 <th>Status</th>
-                <th>Provider txn</th>
+                <th>Payment link</th>
                 <th>Time</th>
               </tr>
             </thead>
@@ -152,7 +154,15 @@ export function PaymentsPanel({ siteId, siteName }: { siteId: string; siteName: 
                   <td>
                     <span className={`payments-badge payments-badge--${transaction.status}`}>{transaction.status}</span>
                   </td>
-                  <td className="payments-muted">{transaction.provider_transaction_id}</td>
+                  <td className="payments-muted">
+                    {transaction.payment_url ? (
+                      <a href={transaction.payment_url} target="_blank" rel="noopener noreferrer">
+                        Open link
+                      </a>
+                    ) : (
+                      transaction.provider_transaction_id
+                    )}
+                  </td>
                   <td className="payments-muted">{new Date(transaction.created_at).toLocaleString()}</td>
                 </tr>
               ))}
@@ -227,7 +237,7 @@ function PurchaseRow({
               disabled={busy}
               onClick={() => void runAction(() => api.siteExecutePurchase(siteId, request.id))}
             >
-              Execute
+              Create link
             </button>
           ) : null}
           {!canDecide && !canExecute ? <span className="payments-muted">—</span> : null}

@@ -381,7 +381,7 @@ async function runChatPurchase(
   }
 
   const accountId = site._id.toHexString();
-  provisionPaymentIdentity(accountId);
+  provisionPaymentIdentity(accountId, config);
 
   try {
     const { purchase, parsed } = await createPurchaseFromPrompt(accountId, text, config);
@@ -391,7 +391,7 @@ async function runChatPurchase(
     const header = `🛒 **${merchant}** — ${amount}${estimated} for **${site.name}**`;
 
     if (purchase.status === "approved") {
-      return `${header}\n\n✅ **Approved** automatically (${purchase.decisionReason}). Open the **Payments** tab on **${site.name}** and hit **Execute** to pay.`;
+      return `${header}\n\n✅ **Approved** automatically (${purchase.decisionReason}). Open the **Payments** tab on **${site.name}** and create a payment link to send.`;
     }
     if (purchase.status === "requires_approval") {
       return `${header}\n\n⏳ **Needs your approval** — ${purchase.decisionReason}. Review it in the **Payments** tab on **${site.name}**.`;

@@ -26,8 +26,8 @@ import { readActiveBearerIdentity } from "./shared/bearer-auth.js";
 
 type Provider = "mock" | "stripe";
 type PaymentIdentityStatus = "active" | "paused" | "disabled";
-type PurchaseStatus = "pending" | "approved" | "requires_approval" | "rejected" | "executed" | "failed";
-type TransactionStatus = "successful" | "declined" | "failed";
+type PurchaseStatus = "pending" | "approved" | "requires_approval" | "rejected" | "payment_link_created" | "executed" | "failed";
+type TransactionStatus = "payment_link_created" | "successful" | "declined" | "failed";
 
 interface PaymentIdentity {
   id: string;
@@ -80,6 +80,7 @@ interface Transaction {
   currency: string;
   status: TransactionStatus;
   decisionReason: string;
+  paymentUrl: string | null;
   createdAt: Date;
 }
 
@@ -134,16 +135,17 @@ const policySchema = z.object({
 // Provisioning + lookups
 // ---------------------------------------------------------------------------
 
-export function provisionPaymentIdentity(accountId: string): PaymentIdentity {
+export function provisionPaymentIdentity(accountId: string, config?: AppConfig): PaymentIdentity {
   const existing = paymentIdentityByAccount.get(accountId);
   if (existing) {
     return existing;
   }
-  const card = mockCreateCard(accountId);
+  const provider = resolvePaymentProvider(config);
+  const card = provider === "stripe" ? stripeCreatePaymentLinkProvider() : mockCreateCard(accountId);
   const identity: PaymentIdentity = {
     id: `payid_${randomId(8)}`,
     accountId,
-    provider: "mock",
+    provider,
     providerCardId: card.providerCardId,
     cardLast4: card.cardLast4,
     status: "active",
@@ -154,7 +156,7 @@ export function provisionPaymentIdentity(accountId: string): PaymentIdentity {
   const now = new Date();
   policyByAccount.set(accountId, { accountId, ...DEFAULT_POLICY, createdAt: now, updatedAt: now });
 
-  recordIdentityAudit(accountId, "payment.provision", "allowed", `Virtual card •••• ${identity.cardLast4} provisioned.`);
+  recordIdentityAudit(accountId, "payment.provision", "allowed", `${provider === "stripe" ? "Stripe payment links" : `Virtual card •••• ${identity.cardLast4}`} provisioned.`);
   return identity;
 }
 
@@ -262,7 +264,12 @@ export function decidePurchase(
   return purchase;
 }
 
-export function executeApprovedPurchase(accountId: string, requestId: string, idempotencyKey?: string): Transaction {
+export async function executeApprovedPurchase(
+  accountId: string,
+  requestId: string,
+  config?: AppConfig,
+  idempotencyKey?: string
+): Promise<Transaction> {
   const purchase = requestById.get(requestId);
   if (!purchase || purchase.accountId !== accountId) {
     throw new PaymentError(404, "purchase request not found");
@@ -288,7 +295,7 @@ export function executeApprovedPurchase(accountId: string, requestId: string, id
     throw new PaymentError(409, "no active payment identity");
   }
 
-  const result = mockCharge({ merchantName: purchase.merchantName, amount: purchase.amount, currency: purchase.currency });
+  const result = await createPaymentLink(paymentIdentity, purchase, config, key);
   const txn: Transaction = {
     id: `txn_${randomId(8)}`,
     accountId,
@@ -300,6 +307,7 @@ export function executeApprovedPurchase(accountId: string, requestId: string, id
     currency: purchase.currency,
     status: result.status,
     decisionReason: result.reason,
+    paymentUrl: result.paymentUrl,
     createdAt: new Date()
   };
   const list = transactionsByAccount.get(accountId) ?? [];
@@ -308,12 +316,12 @@ export function executeApprovedPurchase(accountId: string, requestId: string, id
   transactionByRequestId.set(txn.purchaseRequestId, txn);
   idempotencyKeys.set(key, txn.id);
 
-  purchase.status = result.status === "successful" ? "executed" : "failed";
+  purchase.status = result.status === "payment_link_created" ? "payment_link_created" : result.status === "successful" ? "executed" : "failed";
   purchase.decisionReason = result.reason;
   recordIdentityAudit(
     accountId,
     "payment.execute",
-    result.status === "successful" ? "allowed" : "blocked",
+    result.status === "payment_link_created" || result.status === "successful" ? "allowed" : "blocked",
     `${result.status} • ${purchase.merchantName} • ${formatAmount(purchase.amount, purchase.currency)}`
   );
   return txn;
@@ -403,30 +411,140 @@ export function evaluatePurchaseRequest(
 }
 
 // ---------------------------------------------------------------------------
-// Mock payment provider — the agent never sees card details.
+// Payment providers — the agent never sees card details.
 // ---------------------------------------------------------------------------
+
+function resolvePaymentProvider(config?: AppConfig): Provider {
+  return config?.PAYMENT_PROVIDER ?? (process.env.PAYMENT_PROVIDER === "stripe" ? "stripe" : "mock");
+}
 
 function mockCreateCard(accountId: string): { providerCardId: string; cardLast4: string } {
   return { providerCardId: `mock_card_${accountId}`, cardLast4: "4242" };
 }
 
-function mockCharge(input: { merchantName: string; amount: number; currency: string }): {
+function stripeCreatePaymentLinkProvider(): { providerCardId: string; cardLast4: string } {
+  return { providerCardId: "stripe_checkout", cardLast4: "link" };
+}
+
+async function createPaymentLink(
+  paymentIdentity: PaymentIdentity,
+  purchase: PurchaseRequest,
+  config: AppConfig | undefined,
+  idempotencyKey: string
+): Promise<{ providerTransactionId: string; status: TransactionStatus; reason: string; paymentUrl: string | null }> {
+  if (paymentIdentity.provider === "stripe") {
+    return stripeCreateCheckoutSession(purchase, config, idempotencyKey);
+  }
+
+  return mockCreatePaymentLink({ merchantName: purchase.merchantName, amount: purchase.amount, currency: purchase.currency });
+}
+
+function mockCreatePaymentLink(input: { merchantName: string; amount: number; currency: string }): {
   providerTransactionId: string;
   status: TransactionStatus;
   reason: string;
+  paymentUrl: string | null;
 } {
   const providerTransactionId = `mock_txn_${randomId(8)}`;
   if (/_DECLINE$/i.test(input.merchantName)) {
-    return { providerTransactionId, status: "declined", reason: `Mock decline for ${input.merchantName}` };
+    return { providerTransactionId, status: "declined", reason: `Mock decline for ${input.merchantName}`, paymentUrl: null };
   }
   if (/_FAIL$/i.test(input.merchantName)) {
-    return { providerTransactionId, status: "failed", reason: `Mock provider error for ${input.merchantName}` };
+    return { providerTransactionId, status: "failed", reason: `Mock provider error for ${input.merchantName}`, paymentUrl: null };
   }
+  const paymentUrl = `https://pay.stripe.com/test/mock_${providerTransactionId}`;
   return {
     providerTransactionId,
-    status: "successful",
-    reason: `Mock payment successful to ${input.merchantName} for ${formatAmount(input.amount, input.currency)}`
+    status: "payment_link_created",
+    reason: `Mock payment link created for ${input.merchantName} at ${formatAmount(input.amount, input.currency)}`,
+    paymentUrl
   };
+}
+
+async function stripeCreateCheckoutSession(
+  purchase: PurchaseRequest,
+  config: AppConfig | undefined,
+  idempotencyKey: string
+): Promise<{ providerTransactionId: string; status: TransactionStatus; reason: string; paymentUrl: string | null }> {
+  const secretKey = config?.STRIPE_SECRET_KEY ?? process.env.STRIPE_SECRET_KEY;
+  if (!secretKey) {
+    throw new PaymentError(503, "Stripe is not configured. Set STRIPE_SECRET_KEY or use PAYMENT_PROVIDER=mock.");
+  }
+
+  const body = new URLSearchParams({
+    mode: "payment",
+    success_url: resolveStripeReturnUrl(config, "success", purchase.id),
+    cancel_url: resolveStripeReturnUrl(config, "cancel", purchase.id),
+    "line_items[0][quantity]": "1",
+    "line_items[0][price_data][currency]": purchase.currency.toLowerCase(),
+    "line_items[0][price_data][unit_amount]": String(toStripeMinorUnits(purchase.amount, purchase.currency)),
+    "line_items[0][price_data][product_data][name]": paymentLinkProductName(purchase),
+    "line_items[0][price_data][product_data][description]": purchase.purpose,
+    "metadata[account_id]": purchase.accountId,
+    "metadata[purchase_request_id]": purchase.id,
+    "metadata[merchant_name]": purchase.merchantName
+  });
+
+  const response = await fetch("https://api.stripe.com/v1/checkout/sessions", {
+    method: "POST",
+    headers: {
+      authorization: `Basic ${Buffer.from(`${secretKey}:`).toString("base64")}`,
+      "content-type": "application/x-www-form-urlencoded",
+      "idempotency-key": idempotencyKey
+    },
+    body
+  });
+
+  const responseBody = await response.json().catch(() => ({})) as StripeCheckoutSessionResponse;
+  if (!response.ok) {
+    const message = responseBody.error?.message ?? `Stripe Checkout Session failed with HTTP ${response.status}`;
+    throw new PaymentError(502, message);
+  }
+
+  const providerTransactionId = responseBody.id ?? `stripe_checkout_${randomId(8)}`;
+  if (!responseBody.url) {
+    throw new PaymentError(502, "Stripe did not return a payment link.");
+  }
+
+  return {
+    providerTransactionId,
+    status: "payment_link_created",
+    reason: `Stripe payment link created for ${purchase.merchantName} at ${formatAmount(purchase.amount, purchase.currency)}`,
+    paymentUrl: responseBody.url
+  };
+}
+
+interface StripeCheckoutSessionResponse {
+  id?: string;
+  url?: string;
+  error?: {
+    message?: string;
+  };
+}
+
+const ZERO_DECIMAL_CURRENCIES = new Set([
+  "BIF", "CLP", "DJF", "GNF", "JPY", "KMF", "KRW", "MGA", "PYG", "RWF", "UGX", "VND", "VUV", "XAF", "XOF", "XPF"
+]);
+
+function toStripeMinorUnits(amount: number, currency: string): number {
+  const normalizedCurrency = currency.toUpperCase();
+  const multiplier = ZERO_DECIMAL_CURRENCIES.has(normalizedCurrency) ? 1 : 100;
+  return Math.round(amount * multiplier);
+}
+
+function paymentLinkProductName(purchase: PurchaseRequest): string {
+  return purchase.item ? `${purchase.item} from ${purchase.merchantName}` : purchase.merchantName;
+}
+
+function resolveStripeReturnUrl(config: AppConfig | undefined, outcome: "success" | "cancel", requestId: string): string {
+  const configured = outcome === "success" ? config?.STRIPE_SUCCESS_URL : config?.STRIPE_CANCEL_URL;
+  if (configured) {
+    return configured.replace("{REQUEST_ID}", requestId);
+  }
+
+  const appUrl = (config?.PUBLIC_APP_URL ?? process.env.PUBLIC_APP_URL ?? "http://localhost:5173").replace(/\/$/, "");
+  const separator = appUrl.includes("?") ? "&" : "?";
+  return `${appUrl}${separator}payment=${outcome}&request_id=${encodeURIComponent(requestId)}&session_id={CHECKOUT_SESSION_ID}`;
 }
 
 // ---------------------------------------------------------------------------
@@ -677,8 +795,8 @@ export function registerPaymentRoutes(app: FastifyInstance, config: AppConfig) {
     const identity = readActiveBearerIdentity(request);
     if (!identity) return reply.code(401).send({ error: "missing or invalid identity token" });
     const { requestId } = request.params as { requestId: string };
-    return runWithHttpToolError(reply, () => {
-      const txn = executeApprovedPurchase(identity.id, requestId, readIdempotencyKey(request));
+    return runWithHttpToolError(reply, async () => {
+      const txn = await executeApprovedPurchase(identity.id, requestId, config, readIdempotencyKey(request));
       return serializeTransaction(txn);
     });
   });
@@ -726,7 +844,7 @@ export function registerSitePaymentRoutes(app: FastifyInstance, collections: Col
       return null;
     }
     const accountId = site._id.toHexString();
-    provisionPaymentIdentity(accountId); // lazy: card + default policy on first touch
+    provisionPaymentIdentity(accountId, config); // lazy: card + default policy on first touch
     return accountId;
   };
 
@@ -773,7 +891,9 @@ export function registerSitePaymentRoutes(app: FastifyInstance, collections: Col
     const accountId = await resolveSiteAccount(request, reply);
     if (!accountId) return;
     const { requestId } = request.params as { requestId: string };
-    return runWithHttpToolError(reply, () => serializeTransaction(executeApprovedPurchase(accountId, requestId, readIdempotencyKey(request))));
+    return runWithHttpToolError(reply, async () =>
+      serializeTransaction(await executeApprovedPurchase(accountId, requestId, config, readIdempotencyKey(request)))
+    );
   });
 
   app.patch("/api/sites/:siteId/payments/policy", async (request, reply) => {
@@ -838,6 +958,7 @@ function serializeTransaction(txn: Transaction) {
     purchase_request_id: txn.purchaseRequestId,
     provider: txn.provider,
     provider_transaction_id: txn.providerTransactionId,
+    payment_url: txn.paymentUrl,
     merchant_name: txn.merchantName,
     amount: txn.amount,
     currency: txn.currency,
@@ -891,5 +1012,3 @@ function formatAmount(amount: number, currency: string): string {
 export function formatPurchaseAmount(amount: number, currency: string): string {
   return formatAmount(amount, currency);
 }
-
-

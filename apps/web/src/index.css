@@ -5358,6 +5358,7 @@ button:disabled {
 
 .payments-badge--approved,
 .payments-badge--executed,
+.payments-badge--payment_link_created,
 .payments-badge--successful {
   background: rgba(15, 138, 77, 0.12);
   color: #0f8a4d;

@@ -130,7 +130,7 @@ export function registerIdentityRoutes(app: FastifyInstance, config: AppConfig) 
     } | null = null;
     if (tools.includes("payment")) {
       const { provisionPaymentIdentity } = await import("./payments.js");
-      const card = provisionPaymentIdentity(identity.id);
+      const card = provisionPaymentIdentity(identity.id, config);
       payment = {
         payment_identity_id: card.id,
         provider: card.provider,
@@ -346,5 +346,4 @@ export function recordIdentityAudit(
   }
   pushAudit(identity, action, status, detail);
 }
-
 
