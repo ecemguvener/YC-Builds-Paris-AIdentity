@@ -1,7 +1,7 @@
-import crypto from "node:crypto";
 import type { FastifyInstance } from "fastify";
 import { z } from "zod";
 import type { AppConfig } from "./config.js";
+import { randomId, randomDigits, slugify } from "./shared/crypto.js";
 
 type ToolName = "email" | "phone" | "calendar" | "payment";
 type PermissionName = "email.send" | "phone.call" | "calendar.create" | "payment.purchase";
@@ -347,24 +347,4 @@ export function recordIdentityAudit(
   pushAudit(identity, action, status, detail);
 }
 
-function randomId(byteLength: number): string {
-  return crypto.randomBytes(byteLength).toString("base64url");
-}
 
-function randomDigits(length: number): string {
-  let value = "";
-  for (let index = 0; index < length; index += 1) {
-    value += crypto.randomInt(10).toString();
-  }
-  return value;
-}
-
-function slugify(value: string): string {
-  const slug = value
-    .trim()
-    .toLowerCase()
-    .replace(/[^a-z0-9]+/g, "-")
-    .replace(/^-+|-+$/g, "");
-
-  return slug || "agent";
-}

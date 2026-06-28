@@ -1,11 +1,14 @@
 import crypto from "node:crypto";
-import { ObjectId } from "mongodb";
 import type { FastifyInstance, FastifyReply, FastifyRequest } from "fastify";
 import { z } from "zod";
 import type { AppConfig } from "./config.js";
 import type { Collections } from "./db.js";
 import { requireAuth } from "./auth.js";
-import { getAgentIdentityByToken, recordIdentityAudit, type AgentIdentity } from "./identity.js";
+import { recordIdentityAudit, type AgentIdentity } from "./identity.js";
+import { randomId, slugify } from "./shared/crypto.js";
+import { readOpenAIOutputText, cleanJsonFences } from "./shared/openai-output.js";
+import { parseObjectId, readNonEmptyString, HttpToolError, runWithHttpToolError } from "./shared/http.js";
+import { readActiveBearerIdentity } from "./shared/bearer-auth.js";
 
 // ---------------------------------------------------------------------------
 // Email Capability Add-on
@@ -80,15 +83,7 @@ const notificationsByAccount = new Map<string, EmailReplyNotification[]>();
 const threadByCounterparty = new Map<string, string>(); // `${accountId}:${counterparty}` -> threadId
 
 /** Error carrying an HTTP status so route handlers can translate cleanly. */
-export class EmailError extends Error {
-  constructor(
-    readonly status: number,
-    message: string
-  ) {
-    super(message);
-    this.name = "EmailError";
-  }
-}
+export class EmailError extends HttpToolError {}
 
 // ---------------------------------------------------------------------------
 // Schemas
@@ -141,7 +136,7 @@ export function ensureSiteEmailIdentity(accountId: string, displayName: string, 
   if (existing) {
     return existing;
   }
-  const address = `${slugify(displayName)}-${randomId(4)}@${config.EMAIL_FROM_DOMAIN}`;
+  const address = `${slugify(displayName, "assistant")}-${randomId(4)}@${config.EMAIL_FROM_DOMAIN}`;
   return provisionEmailIdentity(accountId, address, displayName, config);
 }
 
@@ -454,7 +449,7 @@ async function draftWithOpenAI(prompt: string, senderName: string, config: AppCo
   if (!outputText) {
     throw new Error("OpenAI returned no output");
   }
-  const raw = JSON.parse(outputText.trim().replace(/^```(?:json)?\s*/i, "").replace(/\s*```$/, "")) as Record<string, unknown>;
+  const raw = JSON.parse(cleanJsonFences(outputText)) as Record<string, unknown>;
   const to = typeof raw.to === "string" ? extractEmail(raw.to) : extractEmail(prompt);
   return {
     to,
@@ -512,7 +507,7 @@ export async function summarizeReply(subject: string, body: string, config: AppC
       if (response.ok) {
         const outputText = readOpenAIOutputText(responseText);
         if (outputText) {
-          const raw = JSON.parse(outputText.trim().replace(/^```(?:json)?\s*/i, "").replace(/\s*```$/, "")) as Record<string, unknown>;
+          const raw = JSON.parse(cleanJsonFences(outputText)) as Record<string, unknown>;
           return {
             summary: String(raw.summary ?? "").trim() || summarizeHeuristic(body),
             suggestedReply: String(raw.suggested_reply ?? "").trim() || "Thanks for getting back to me — I'll follow up shortly."
@@ -571,17 +566,6 @@ function summarizeHeuristic(body: string): string {
 
 function stripHtml(html: string): string {
   return html.replace(/<style[\s\S]*?<\/style>/gi, "").replace(/<[^>]+>/g, " ").replace(/\s+/g, " ").trim();
-}
-
-function readOpenAIOutputText(responseText: string): string {
-  const response = JSON.parse(responseText) as { output?: Array<{ content?: Array<{ type?: string; text?: string }> }> };
-  return (
-    response.output
-      ?.flatMap((item) => item.content ?? [])
-      .filter((content): content is { type: string; text: string } => content.type === "output_text" && typeof content.text === "string")
-      .map((content) => content.text)
-      .join("") ?? ""
-  );
 }
 
 // ---------------------------------------------------------------------------
@@ -660,9 +644,7 @@ function firstAddress(value: unknown): string | null {
   return null;
 }
 
-function asString(value: unknown): string | null {
-  return typeof value === "string" && value.trim() ? value.trim() : null;
-}
+const asString = readNonEmptyString;
 
 // ---------------------------------------------------------------------------
 // Resend webhook signature verification (Svix). The signing secret looks like
@@ -712,36 +694,36 @@ function timingSafeEqualStrings(a: string, b: string): boolean {
 
 export function registerEmailRoutes(app: FastifyInstance, config: AppConfig) {
   app.post("/api/tools/email/request", async (request, reply) => {
-    const identity = readBearerIdentity(request);
+    const identity = readActiveBearerIdentity(request);
     if (!identity) return reply.code(401).send({ error: "missing or invalid identity token" });
     const payload = requestSchema.parse(request.body ?? {});
-    return runEmail(reply, async () => {
+    return runWithHttpToolError(reply, async () => {
       const { message, parsed } = await sendEmailFromRequest(identity, payload, config);
       return reply.code(201).send({ ...serializeSend(message), parsed: parsed ? serializeParsed(parsed) : null });
     });
   });
 
   app.post("/api/tools/email/send", async (request, reply) => {
-    const identity = readBearerIdentity(request);
+    const identity = readActiveBearerIdentity(request);
     if (!identity) return reply.code(401).send({ error: "missing or invalid identity token" });
     const payload = sendSchema.parse(request.body ?? {});
-    return runEmail(reply, async () => reply.code(201).send(serializeSend(await sendEmail(identity, payload, config))));
+    return runWithHttpToolError(reply, async () => reply.code(201).send(serializeSend(await sendEmail(identity, payload, config))));
   });
 
   app.post("/api/tools/email/pause", async (request, reply) => {
-    const identity = readBearerIdentity(request);
+    const identity = readActiveBearerIdentity(request);
     if (!identity) return reply.code(401).send({ error: "missing or invalid identity token" });
-    return runEmail(reply, () => serializeIdentity(setEmailIdentityStatus(identity.id, "paused")));
+    return runWithHttpToolError(reply, () => serializeIdentity(setEmailIdentityStatus(identity.id, "paused")));
   });
 
   app.post("/api/tools/email/resume", async (request, reply) => {
-    const identity = readBearerIdentity(request);
+    const identity = readActiveBearerIdentity(request);
     if (!identity) return reply.code(401).send({ error: "missing or invalid identity token" });
-    return runEmail(reply, () => serializeIdentity(setEmailIdentityStatus(identity.id, "active")));
+    return runWithHttpToolError(reply, () => serializeIdentity(setEmailIdentityStatus(identity.id, "active")));
   });
 
   app.get("/api/identity/:agentId/email-activity", async (request, reply) => {
-    const identity = readBearerIdentity(request);
+    const identity = readActiveBearerIdentity(request);
     if (!identity) return reply.code(401).send({ error: "missing or invalid identity token" });
     const { agentId } = request.params as { agentId: string };
     if (identity.id !== agentId) return reply.code(403).send({ error: "identity token does not match requested agent" });
@@ -801,7 +783,7 @@ export function registerSiteEmailRoutes(app: FastifyInstance, collections: Colle
     const site = await resolveSite(request, reply);
     if (!site) return;
     const payload = requestSchema.parse(request.body ?? {});
-    return runEmail(reply, async () => {
+    return runWithHttpToolError(reply, async () => {
       const { message, parsed } = await sendSiteEmailFromText(site.accountId, site.name, payload.request, config, payload.to);
       return reply.code(201).send({ ...serializeSend(message), parsed: parsed ? serializeParsed(parsed) : null });
     });
@@ -811,36 +793,25 @@ export function registerSiteEmailRoutes(app: FastifyInstance, collections: Colle
     const site = await resolveSite(request, reply);
     if (!site) return;
     const payload = sendSchema.parse(request.body ?? {});
-    return runEmail(reply, async () => reply.code(201).send(serializeSend(await sendSiteEmail(site.accountId, site.name, payload, config))));
+    return runWithHttpToolError(reply, async () => reply.code(201).send(serializeSend(await sendSiteEmail(site.accountId, site.name, payload, config))));
   });
 
   app.post("/api/sites/:siteId/email/pause", async (request, reply) => {
     const site = await resolveSite(request, reply);
     if (!site) return;
-    return runEmail(reply, () => serializeIdentity(setEmailIdentityStatus(site.accountId, "paused")));
+    return runWithHttpToolError(reply, () => serializeIdentity(setEmailIdentityStatus(site.accountId, "paused")));
   });
 
   app.post("/api/sites/:siteId/email/resume", async (request, reply) => {
     const site = await resolveSite(request, reply);
     if (!site) return;
-    return runEmail(reply, () => serializeIdentity(setEmailIdentityStatus(site.accountId, "active")));
+    return runWithHttpToolError(reply, () => serializeIdentity(setEmailIdentityStatus(site.accountId, "active")));
   });
 }
 
 // ---------------------------------------------------------------------------
 // Helpers
 // ---------------------------------------------------------------------------
-
-async function runEmail(reply: FastifyReply, fn: () => unknown | Promise<unknown>) {
-  try {
-    return await fn();
-  } catch (error) {
-    if (error instanceof EmailError) {
-      return reply.code(error.status).send({ error: error.message });
-    }
-    throw error;
-  }
-}
 
 /** Mirrors identity.checkAction, plus the email-identity pause state. */
 function requireSendableIdentity(identity: AgentIdentity, approved: boolean | undefined): EmailIdentity {
@@ -891,16 +862,6 @@ function newThread(): string {
 
 function formatFrom(identity: EmailIdentity): string {
   return `${identity.displayName} <${identity.emailAddress}>`;
-}
-
-function readBearerIdentity(request: FastifyRequest): AgentIdentity | null {
-  const authorization = request.headers.authorization;
-  if (!authorization) return null;
-  const [scheme, token] = authorization.split(/\s+/, 2);
-  if (scheme?.toLowerCase() !== "bearer" || !token) return null;
-  const identity = getAgentIdentityByToken(token.trim());
-  if (!identity || identity.status !== "active") return null;
-  return identity;
 }
 
 function serializeSend(message: EmailMessage) {
@@ -967,15 +928,4 @@ function serializeIdentity(identity: EmailIdentity) {
   };
 }
 
-function parseObjectId(value: string): ObjectId | null {
-  return ObjectId.isValid(value) ? new ObjectId(value) : null;
-}
 
-function slugify(value: string): string {
-  const slug = value.trim().toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-+|-+$/g, "");
-  return slug || "assistant";
-}
-
-function randomId(byteLength: number): string {
-  return crypto.randomBytes(byteLength).toString("base64url");
-}

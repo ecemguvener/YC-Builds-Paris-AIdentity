@@ -1,11 +1,13 @@
-import crypto from "node:crypto";
-import { ObjectId } from "mongodb";
 import type { FastifyInstance, FastifyReply, FastifyRequest } from "fastify";
 import { z } from "zod";
 import type { AppConfig } from "./config.js";
 import type { Collections } from "./db.js";
 import { requireAuth } from "./auth.js";
-import { getAgentIdentityByToken, recordIdentityAudit, type AgentIdentity } from "./identity.js";
+import { recordIdentityAudit, type AgentIdentity } from "./identity.js";
+import { randomId, escapeRegExp } from "./shared/crypto.js";
+import { readOpenAIOutputText, cleanJsonFences } from "./shared/openai-output.js";
+import { parseObjectId, HttpToolError, runWithHttpToolError } from "./shared/http.js";
+import { readActiveBearerIdentity } from "./shared/bearer-auth.js";
 
 // ---------------------------------------------------------------------------
 // Payment tool module
@@ -101,15 +103,7 @@ const DEFAULT_POLICY = {
 };
 
 /** Error carrying an HTTP status so route handlers can translate cleanly. */
-export class PaymentError extends Error {
-  constructor(
-    readonly status: number,
-    message: string
-  ) {
-    super(message);
-    this.name = "PaymentError";
-  }
-}
+export class PaymentError extends HttpToolError {}
 
 // ---------------------------------------------------------------------------
 // Schemas
@@ -537,7 +531,7 @@ async function parseWithOpenAI(prompt: string, accountId: string, config: AppCon
   if (!outputText) {
     throw new Error("OpenAI returned no output");
   }
-  const raw = JSON.parse(outputText.trim().replace(/^```(?:json)?\s*/i, "").replace(/\s*```$/, "")) as Record<string, unknown>;
+  const raw = JSON.parse(cleanJsonFences(outputText)) as Record<string, unknown>;
   return finalize(raw, "openai", prompt);
 }
 
@@ -651,24 +645,13 @@ function knownMerchants(accountId: string): string[] {
   return [...new Set([...policy.allowedMerchants, ...policy.blockedMerchants])];
 }
 
-function readOpenAIOutputText(responseText: string): string {
-  const response = JSON.parse(responseText) as { output?: Array<{ content?: Array<{ type?: string; text?: string }> }> };
-  return (
-    response.output
-      ?.flatMap((item) => item.content ?? [])
-      .filter((content): content is { type: string; text: string } => content.type === "output_text" && typeof content.text === "string")
-      .map((content) => content.text)
-      .join("") ?? ""
-  );
-}
-
 // ---------------------------------------------------------------------------
 // Routes — agent-facing (Bearer identity token)
 // ---------------------------------------------------------------------------
 
 export function registerPaymentRoutes(app: FastifyInstance, config: AppConfig) {
   app.post("/api/tools/payments/request-purchase", async (request, reply) => {
-    const identity = readBearerIdentity(request);
+    const identity = readActiveBearerIdentity(request);
     if (!identity) return reply.code(401).send({ error: "missing or invalid identity token" });
     const payload = requestPurchaseSchema.parse(request.body ?? {});
     const purchase = createPurchaseRequest(identity.id, fromPayload(payload));
@@ -676,10 +659,10 @@ export function registerPaymentRoutes(app: FastifyInstance, config: AppConfig) {
   });
 
   app.post("/api/tools/payments/request-purchase-from-text", async (request, reply) => {
-    const identity = readBearerIdentity(request);
+    const identity = readActiveBearerIdentity(request);
     if (!identity) return reply.code(401).send({ error: "missing or invalid identity token" });
     const { prompt } = requestPurchaseFromTextSchema.parse(request.body ?? {});
-    return runPayment(reply, async () => {
+    return runWithHttpToolError(reply, async () => {
       const { purchase, parsed } = await createPurchaseFromPrompt(identity.id, prompt, config);
       return reply.code(201).send({ ...serializeDecision(purchase), parsed: serializeParsed(parsed) });
     });
@@ -691,24 +674,24 @@ export function registerPaymentRoutes(app: FastifyInstance, config: AppConfig) {
   app.post("/api/tools/payments/:requestId/reject", (request, reply) => bearerDecide(request, reply, "rejected"));
 
   app.post("/api/tools/payments/:requestId/execute", async (request, reply) => {
-    const identity = readBearerIdentity(request);
+    const identity = readActiveBearerIdentity(request);
     if (!identity) return reply.code(401).send({ error: "missing or invalid identity token" });
     const { requestId } = request.params as { requestId: string };
-    return runPayment(reply, () => {
+    return runWithHttpToolError(reply, () => {
       const txn = executeApprovedPurchase(identity.id, requestId, readIdempotencyKey(request));
       return serializeTransaction(txn);
     });
   });
 
   app.patch("/api/tools/payments/policy", async (request, reply) => {
-    const identity = readBearerIdentity(request);
+    const identity = readActiveBearerIdentity(request);
     if (!identity) return reply.code(401).send({ error: "missing or invalid identity token" });
     const patch = policySchema.parse(request.body ?? {});
     return serializePolicy(updatePaymentPolicy(identity.id, patch));
   });
 
   app.get("/api/identity/:agentId/payment-activity", async (request, reply) => {
-    const identity = readBearerIdentity(request);
+    const identity = readActiveBearerIdentity(request);
     if (!identity) return reply.code(401).send({ error: "missing or invalid identity token" });
     const { agentId } = request.params as { agentId: string };
     if (identity.id !== agentId) return reply.code(403).send({ error: "identity token does not match requested agent" });
@@ -717,11 +700,11 @@ export function registerPaymentRoutes(app: FastifyInstance, config: AppConfig) {
 }
 
 function bearerDecide(request: FastifyRequest, reply: FastifyReply, decision: "approved" | "rejected") {
-  const identity = readBearerIdentity(request);
+  const identity = readActiveBearerIdentity(request);
   if (!identity) return reply.code(401).send({ error: "missing or invalid identity token" });
   const { requestId } = request.params as { requestId: string };
   const { note } = decisionSchema.parse(request.body ?? {});
-  return runPayment(reply, () => serializeDecision(decidePurchase(identity.id, requestId, decision, note)));
+  return runWithHttpToolError(reply, () => serializeDecision(decidePurchase(identity.id, requestId, decision, note)));
 }
 
 // ---------------------------------------------------------------------------
@@ -764,7 +747,7 @@ export function registerSitePaymentRoutes(app: FastifyInstance, collections: Col
     const accountId = await resolveSiteAccount(request, reply);
     if (!accountId) return;
     const { prompt } = requestPurchaseFromTextSchema.parse(request.body ?? {});
-    return runPayment(reply, async () => {
+    return runWithHttpToolError(reply, async () => {
       const { purchase, parsed } = await createPurchaseFromPrompt(accountId, prompt, config);
       return reply.code(201).send({ ...serializeDecision(purchase), parsed: serializeParsed(parsed) });
     });
@@ -775,7 +758,7 @@ export function registerSitePaymentRoutes(app: FastifyInstance, collections: Col
     if (!accountId) return;
     const { requestId } = request.params as { requestId: string };
     const { note } = decisionSchema.parse(request.body ?? {});
-    return runPayment(reply, () => serializeDecision(decidePurchase(accountId, requestId, "approved", note)));
+    return runWithHttpToolError(reply, () => serializeDecision(decidePurchase(accountId, requestId, "approved", note)));
   });
 
   app.post("/api/sites/:siteId/payments/:requestId/reject", async (request, reply) => {
@@ -783,14 +766,14 @@ export function registerSitePaymentRoutes(app: FastifyInstance, collections: Col
     if (!accountId) return;
     const { requestId } = request.params as { requestId: string };
     const { note } = decisionSchema.parse(request.body ?? {});
-    return runPayment(reply, () => serializeDecision(decidePurchase(accountId, requestId, "rejected", note)));
+    return runWithHttpToolError(reply, () => serializeDecision(decidePurchase(accountId, requestId, "rejected", note)));
   });
 
   app.post("/api/sites/:siteId/payments/:requestId/execute", async (request, reply) => {
     const accountId = await resolveSiteAccount(request, reply);
     if (!accountId) return;
     const { requestId } = request.params as { requestId: string };
-    return runPayment(reply, () => serializeTransaction(executeApprovedPurchase(accountId, requestId, readIdempotencyKey(request))));
+    return runWithHttpToolError(reply, () => serializeTransaction(executeApprovedPurchase(accountId, requestId, readIdempotencyKey(request))));
   });
 
   app.patch("/api/sites/:siteId/payments/policy", async (request, reply) => {
@@ -804,17 +787,6 @@ export function registerSitePaymentRoutes(app: FastifyInstance, collections: Col
 // ---------------------------------------------------------------------------
 // Helpers
 // ---------------------------------------------------------------------------
-
-async function runPayment(reply: FastifyReply, fn: () => unknown | Promise<unknown>) {
-  try {
-    return await fn();
-  } catch (error) {
-    if (error instanceof PaymentError) {
-      return reply.code(error.status).send({ error: error.message });
-    }
-    throw error;
-  }
-}
 
 function fromPayload(payload: z.infer<typeof requestPurchaseSchema>): CreatePurchaseInput {
   return {
@@ -890,16 +862,6 @@ function serializePolicy(policy: PaymentPolicy) {
   };
 }
 
-function readBearerIdentity(request: FastifyRequest): AgentIdentity | null {
-  const authorization = request.headers.authorization;
-  if (!authorization) return null;
-  const [scheme, token] = authorization.split(/\s+/, 2);
-  if (scheme?.toLowerCase() !== "bearer" || !token) return null;
-  const identity = getAgentIdentityByToken(token.trim());
-  if (!identity || identity.status !== "active") return null;
-  return identity;
-}
-
 function readIdempotencyKey(request: FastifyRequest): string | undefined {
   const header = request.headers["idempotency-key"];
   return typeof header === "string" && header.trim() ? header.trim() : undefined;
@@ -930,14 +892,4 @@ export function formatPurchaseAmount(amount: number, currency: string): string {
   return formatAmount(amount, currency);
 }
 
-function escapeRegExp(value: string): string {
-  return value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
-}
 
-function parseObjectId(value: string): ObjectId | null {
-  return ObjectId.isValid(value) ? new ObjectId(value) : null;
-}
-
-function randomId(byteLength: number): string {
-  return crypto.randomBytes(byteLength).toString("base64url");
-}

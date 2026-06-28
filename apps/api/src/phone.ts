@@ -1,4 +1,5 @@
 import type { AppConfig } from "./config.js";
+import { readNonEmptyString } from "./shared/http.js";
 
 export interface PhoneCallRequest {
   toNumber: string;
@@ -146,6 +147,4 @@ function normalizePhoneNumber(value: string): string | null {
   return null;
 }
 
-function readString(value: unknown): string | null {
-  return typeof value === "string" && value.trim() ? value.trim() : null;
-}
+const readString = readNonEmptyString;

@@ -8,6 +8,7 @@ import { buildOpenAIEndpointUrl } from "./openai.js";
 import { createPurchaseFromPrompt, formatPurchaseAmount, PaymentError, provisionPaymentIdentity } from "./payments.js";
 import { EmailError, sendSiteEmailFromText } from "./email.js";
 import { PhoneCallError, placeAgentPhoneCall } from "./phone.js";
+import { readNonEmptyString } from "./shared/http.js";
 
 const dashboardChatMessageSchema = z.object({
   role: z.enum(["user", "assistant"]),
@@ -358,10 +359,6 @@ function parseFunctionArguments(argumentsText: string): Record<string, unknown> 
   } catch {
     return {};
   }
-}
-
-function readNonEmptyString(value: unknown): string | null {
-  return typeof value === "string" && value.trim() ? value.trim() : null;
 }
 
 function isPurchaseIntent(text: string): boolean {

@@ -4,6 +4,7 @@ import { z } from "zod";
 import type { AppConfig } from "./config.js";
 import type { ApiKeyDocument, AtlasProjectDocument, Collections, SiteDocument } from "./db.js";
 import { requireAuth } from "./auth.js";
+import { parseObjectId, getErrorMessage } from "./shared/http.js";
 import { buildTrustedDashboardCorsHeaders } from "./cors.js";
 import {
   generateDocumentationWithAgent,
@@ -687,9 +688,7 @@ function normalizeDomain(domain: string): string {
     .toLowerCase();
 }
 
-function parseObjectId(value: string): ObjectId | null {
-  return ObjectId.isValid(value) ? new ObjectId(value) : null;
-}
+
 
 async function loadSiteDocumentationState(
   collections: Collections,
@@ -823,6 +822,4 @@ async function repairSiteAtlasProject(
   return repairedProject;
 }
 
-function getErrorMessage(error: unknown): string {
-  return error instanceof Error ? error.message : String(error);
-}
+
