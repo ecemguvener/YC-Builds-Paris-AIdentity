@@ -7,6 +7,7 @@ import { buildTrustedDashboardCorsHeaders } from "./cors.js";
 import { createPurchaseFromPrompt, formatPurchaseAmount, PaymentError, provisionPaymentIdentity } from "./payments.js";
 import { EmailError, sendSiteEmailFromText } from "./email.js";
 import { PhoneCallError, placeAgentPhoneCall, waitForPhoneCallCompletion, type PhoneCallResult, type PhoneCallTranscriptTurn } from "./phone.js";
+import { placeAmazonOrder } from "./amazon/purchase.js";
 
 const dashboardChatMessageSchema = z.object({
   role: z.enum(["user", "assistant"]),
@@ -41,6 +42,12 @@ After a call completes, always reply with two parts:
 1. **Call summary** — a few tight bullets: who was called, the outcome (booked / declined / no answer / needs follow-up), and any key details from the transcript (time, price, availability, address, what they said).
 2. **What next** — offer 2-3 concrete alternative solutions the user can choose from, especially if the call did not fully achieve the goal. Always include at least one online option — for example ordering the relevant item(s) online (you can place an Amazon order on the user's behalf), emailing the business, trying a different provider, or scheduling a follow-up call. Make the options specific to the task (e.g. if a barber was unavailable, offer to order home grooming kit/clippers online or book a different shop). End by offering to do any of them.
 Mention when a call is simulated because ElevenLabs env vars are missing.
+
+Online orders:
+- When the user asks to buy/order/get a product or book, use the order_on_amazon tool. Defaults (Amazon UK, paperback, saved address, budget cap, saved card) are applied automatically.
+- ALWAYS review first: call order_on_amazon with approved=false, then show the user the item, price, and that it ships to the saved address. Ask them to confirm before buying.
+- Only after the user explicitly confirms (e.g. "yes", "place it"), call order_on_amazon with approved=true to place the real order, then report the order number.
+- If the result status is "blocked", tell the user why (e.g. over budget, or a verification wall) and do not place it. If "review", present it and ask for confirmation. Never claim an order was placed unless the tool returns status "placed".
 
 Style:
 - Be decisive and operational, like an agent executing the user's real-world request.
@@ -268,6 +275,28 @@ function buildOpenClawTools(includeWebSearch: boolean): Array<Record<string, unk
         required: ["to_number", "task", "agent_identity_name", "recipient_name", "context", "source_url"]
       },
       strict: true
+    },
+    {
+      type: "function",
+      name: "order_on_amazon",
+      description:
+        "Order a product (by default a paperback book) on Amazon UK using the agent's saved delivery address and card. ALWAYS call first with approved=false to get the order review (item, price, shipping) WITHOUT buying; show it to the user and ask them to confirm. Only call again with approved=true after the user explicitly confirms, to place the real order. Orders above the budget cap are blocked automatically.",
+      parameters: {
+        type: "object",
+        additionalProperties: false,
+        properties: {
+          query: {
+            type: "string",
+            description: "What to buy — e.g. a book title. Marketplace and format defaults are applied automatically."
+          },
+          approved: {
+            type: "boolean",
+            description: "false = review only, never buys. true = place the real order; set true ONLY after the user explicitly confirms the reviewed item."
+          }
+        },
+        required: ["query", "approved"]
+      },
+      strict: true
     }
   ];
 }
@@ -283,6 +312,18 @@ async function runOpenClawTool(
   callerName: string,
   onCallEvent?: (event: DashboardChatCallEvent) => void
 ): Promise<Record<string, unknown>> {
+  if (functionCall.name === "order_on_amazon") {
+    const parsed = parseFunctionArguments(functionCall.argumentsText);
+    const query = readNonEmptyString(parsed.query) || "";
+    const approved = parsed.approved === true;
+    try {
+      const order = await placeAmazonOrder(query, approved, config);
+      return { tool: functionCall.name, ...order };
+    } catch (error) {
+      return { ok: false, tool: functionCall.name, error: (error as Error).message };
+    }
+  }
+
   if (functionCall.name !== "place_phone_call") {
     return {
       ok: false,
