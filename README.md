@@ -1,119 +1,174 @@
 # aidentity.space
 
-aidentity.space is a web product for issuing real-world identities to AI agents. Each agent identity can be linked to an OpenClaw instance and provisioned with a phone number, email address, payment card, calendar, and other real-world tools.
+aidentity.space gives an AI agent what it needs to act in the real world: a phone number, an email address, a payment card, and a calendar. One API call sets it all up. Every action the agent takes (a call, an email, a payment) runs through us, so there is a record of what it did and a limit on what it is allowed to do — a building block like Stripe or Twilio, except a single layer that covers all of them at once, with the guardrails built in.
 
-The dashboard supports the current agent identity flow:
+The agent stays the brain. aidentity.space is the identity + governance layer it plugs into.
 
-- Create a new agent identity.
-- Choose an existing OpenClaw instance or a managed OpenClaw deployment.
-- Copy a prompt into OpenClaw so it can install the aidentity.space identity skill and confirm linking through a tokenized endpoint.
-- Manage identity details, OpenClaw link tokens, dashboard chat, phone, email, and payment tools.
+## How it works (the workflow)
 
-The backend still keeps the original `sites` and `site-setups` route names internally for speed during the hackathon. The user-facing product language is agent identities.
+1. **Issue an identity.** `POST /api/identity/init` mints an agent identity and returns an `identity_token` plus the `tool_endpoints` the agent can call. The agent gets an email address (`<name>-<rand>@<EMAIL_FROM_DOMAIN>`), a phone number, a calendar URL, and (optionally) a virtual payment card.
+2. **Link a runtime.** From the dashboard, attach the identity to an existing OpenClaw instance or a managed deployment by copying a setup prompt and confirming the link through a tokenized endpoint.
+3. **The agent acts through its identity.** Using `Authorization: Bearer <identity_token>`, the agent calls the tool endpoints to send email, place calls, make payments, or book calendar events.
+4. **Governance on every action.** Each call is gated by the identity's **permissions**, may require **human approval**, and is written to the **audit log**. Spending runs through a policy engine (approve / reject / requires-approval).
+5. **Revoke instantly.** `POST /api/identity/revoke` is the kill switch — it disables the token so no further action can be taken.
 
-## Runtime
+**Real-world tools:** email (real send/receive), phone (calls), payments (virtual card + policy), calendar (events). When provider keys are absent, tools run in **mock mode** so the full flow is demoable without external accounts.
 
-- Web dashboard: React + Vite in `apps/web`
-- Node API: Fastify + MongoDB in `apps/api`
+## Architecture
+
+- **Web dashboard** — React + Vite in `apps/web` (`@aidentity/web`)
+- **API** — Fastify + MongoDB in `apps/api` (`@aidentity/api`)
+- Capability state (identity, email, payments) is kept in-memory and keyed by an opaque account id; MongoDB stores durable data (users, sessions, sites, API keys, docs).
 
 ## Prerequisites
 
 - Node.js 18+
-- MongoDB
-- OpenAI API key for dashboard chat
-- ElevenLabs API keys for real outbound calls; without them calls run in mock mode
-- Resend API key for real email sending; without it email runs in mock mode
+- MongoDB running locally (or a connection string)
+- `OPENAI_API_KEY` — dashboard chat + natural-language email/payment drafting (falls back to a heuristic when unset)
+- `RESEND_API_KEY` — real email sending (mock mode without it)
+- `ELEVENLABS_*` — real outbound calls (mock mode without them)
 
-## Web Setup
+## Setup
 
-Install dependencies:
+Install dependencies (npm workspaces):
 
-```powershell
+```bash
 npm install
 ```
 
-Create `.env` from `.env.example` and set:
+Create `.env` from `.env.example`:
 
 ```text
+NODE_ENV=development
+API_PORT=4001
 PUBLIC_APP_URL=http://localhost:4888
 PUBLIC_API_URL=http://localhost:4001
-MONGODB_URI=mongodb://127.0.0.1:27017/barkan
+MONGODB_URI=mongodb://127.0.0.1:27017/aidentity
 SESSION_SECRET=replace-with-a-long-random-secret
+
+# LLM (dashboard chat + drafting)
+OPENAI_API_KEY=
+OPENAI_DASHBOARD_CHAT_MODEL=gpt-5.4-2026-03-05
+OPENAI_EMAIL_MODEL=gpt-4o-mini
+
+# Voice (optional; mock mode when blank)
 ELEVENLABS_API_KEY=
 ELEVENLABS_AGENT_ID=
 ELEVENLABS_AGENT_PHONE_NUMBER_ID=
 ELEVENLABS_VOICE_ID=kPzsL2i3teMYv0FxEYQ6
-OPENAI_API_KEY=
-OPENAI_DASHBOARD_CHAT_MODEL=gpt-5.4-2026-03-05
+
+# Email capability (Resend). Blank RESEND_API_KEY => mock mode.
+RESEND_API_KEY=
+EMAIL_FROM_DOMAIN=aidentity.space
+EMAIL_WEBHOOK_SECRET=
+# Demo helper: deliver every send to this address via Resend's test sender
+# until your domain is verified (activity log keeps the intended recipient).
+EMAIL_SANDBOX_REDIRECT_TO=
 ```
 
-Run locally:
+## Running locally
 
-```powershell
+```bash
 npm run dev
 ```
 
-The dashboard runs on `http://localhost:4888` and the API runs on `http://localhost:4001`.
+The dashboard runs on `http://localhost:4888` and the API on `http://localhost:4001`.
 
-## Demo Account
+> **macOS note:** `scripts/dev.sh` uses `wait -n`, which needs Bash 4+. The default macOS Bash is 3.2, so run the two workspaces directly instead:
+>
+> ```bash
+> API_PORT=4001 PUBLIC_APP_URL=http://localhost:4888 PUBLIC_API_URL=http://127.0.0.1:4001 \
+>   npm --workspace @aidentity/api run dev
+> # in a second terminal:
+> API_PROXY_TARGET=http://127.0.0.1:4001 npm --workspace @aidentity/web run dev
+> ```
 
-Seed a polished local demo account with fake agent identities, OpenClaw links, API tokens, and recent activity:
+## Demo account
 
-```powershell
+Seed a local demo account with agent identities, OpenClaw links, tokens, and activity:
+
+```bash
 npm run seed:demo
 ```
-
-Login:
 
 ```text
 Email: demo@aidentity.test
 Password: demo-password
 ```
 
-You can override the credentials with `DEMO_EMAIL`, `DEMO_PASSWORD`, and `DEMO_NAME`.
+Override with `DEMO_EMAIL`, `DEMO_PASSWORD`, `DEMO_NAME`.
 
-## Production Deploy
+## Agent tools
 
-Normal builds are verification-only and do not update production:
+All agent-facing endpoints authenticate with `Authorization: Bearer <identity_token>` and are gated by the identity's permissions, human-approval setting, and audit log.
 
-```powershell
-npm run build
-```
+**Identity lifecycle**
 
-Initialize or reload the production API process in PM2:
+| Method & path | Purpose |
+|---|---|
+| `POST /api/identity/init` | Create an identity; returns the token + `tool_endpoints` |
+| `GET /api/identity/:agentId/audit-log` | Full audit trail for the identity |
+| `POST /api/identity/revoke` | Kill switch — revoke the token |
 
-```powershell
-npm run pm2:start-prod-api
-```
+**Email** — real send/receive via Resend (mock when unconfigured)
 
-Production web updates are explicit:
+| Method & path | Purpose |
+|---|---|
+| `POST /api/tools/email/request` | Draft + send from a plain-English instruction |
+| `POST /api/tools/email/send` | Send an explicit `to` / `subject` / `body` |
+| `POST /api/tools/email/pause` · `/resume` | Pause/resume the email identity |
+| `GET /api/identity/:agentId/email-activity` | Messages + reply notifications |
+| `POST /api/webhooks/email/inbound` | Resend inbound webhook (Svix-signature verified) |
 
-```powershell
-npm run deploy:barkan-web
-```
-
-## Payment Tool
-
-The payment tool gives an agent identity a real-world spending capability, alongside email/phone/calendar. It follows the same pattern as the other tools: in-memory store, bearer identity-token auth, and every decision written to the identity audit log. The agent never sees card details; it can only request a purchase, and the policy engine decides approve, reject, or requires approval.
-
-Agent-facing endpoints use `Authorization: Bearer <identity_token>`:
+**Payments** — virtual card + policy engine; the agent never sees card details
 
 | Method & path | Purpose |
 |---|---|
 | `POST /api/tools/payments/request-purchase` | Request a purchase |
-| `POST /api/tools/payments/request-purchase-from-text` | Parse natural language into a purchase request |
-| `POST /api/tools/payments/:requestId/approve` / `/reject` | Human decision on a request |
+| `POST /api/tools/payments/request-purchase-from-text` | Parse natural language into a request |
+| `POST /api/tools/payments/:requestId/approve` · `/reject` | Human decision |
 | `POST /api/tools/payments/:requestId/execute` | Execute an approved purchase |
 | `PATCH /api/tools/payments/policy` | Update the spending policy |
-| `GET /api/identity/:agentId/payment-activity` | Policy, purchase requests, and transactions |
+| `GET /api/identity/:agentId/payment-activity` | Policy, requests, and transactions |
 
-## Project Structure
+**Phone & calendar** — `POST /api/tools/phone/call` and `POST /api/tools/calendar/book` (mock unless provider keys are set).
+
+## Email setup (real sending)
+
+The default domain is `aidentity.space`. To send real email instead of mock:
+
+1. Add the domain in **Resend** and copy the DNS records into your registrar (SPF + DKIM + MX).
+2. Set `RESEND_API_KEY` and `EMAIL_FROM_DOMAIN` in `.env`.
+3. For inbound replies, point Resend Inbound at `POST /api/webhooks/email/inbound` and set `EMAIL_WEBHOOK_SECRET` to the `whsec_…` signing secret.
+
+Before a domain is verified, set `EMAIL_SANDBOX_REDIRECT_TO=<your-resend-account-email>` to have every send delivered to that inbox via Resend's test sender (the activity log still records the intended recipient).
+
+## Production deploy
+
+Builds are verification-only and do not update production:
+
+```bash
+npm run build
+```
+
+Initialize/reload the production API in PM2, and deploy the web build:
+
+```bash
+npm run pm2:start-prod-api
+npm run deploy:aidentity-web
+```
+
+## Dev workflow
+
+- `npm test` — run the workspace test suites (API: vitest).
+- Type-check a workspace: `npm --workspace @aidentity/api exec tsc -p tsconfig.json --noEmit` (same for `@aidentity/web`).
+- Commit on a feature branch and open a PR; the landing/marketing copy and pricing follow the exec summary (`06-exec-summary-EN-v2.pdf`).
+
+## Project structure
 
 ```text
 apps/
-  api/                     Fastify + MongoDB backend
-  web/                     React + Vite dashboard
-_bmad/                     BMAD configuration
-.agents/                   BMAD agent skills
-AGENTS.md                  Repo architecture and agent instructions
+  api/   Fastify + MongoDB backend (@aidentity/api)
+  web/   React + Vite dashboard + static homepage in public/aidentity-homepage (@aidentity/web)
+scripts/ dev + deploy helpers
 ```
