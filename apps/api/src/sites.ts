@@ -4,20 +4,9 @@ import { z } from "zod";
 import type { AppConfig } from "./config.js";
 import type { ApiKeyDocument, AtlasProjectDocument, Collections, SiteDocument } from "./db.js";
 import { requireAuth } from "./auth.js";
-import { buildTrustedDashboardCorsHeaders } from "./cors.js";
-import {
-  generateDocumentationWithAgent,
-  getAtlasDocumentationGenerationStatus,
-  getAtlasAgentStatus
-} from "./atlas/agent-bridge.js";
-import {
-  createAtlasDocumentationObject,
-  loadAtlasDocumentationParts,
-  saveAtlasDocumentationObject
-} from "./atlas/documentation.js";
 import {
   createAtlasProjectId,
-  createBarkanApiKey,
+  createAidentityApiKey,
   createPublicSiteKey,
   createSitePreviewImage,
   hashApiKey,
@@ -27,8 +16,7 @@ import {
 
 const updateSiteSchema = z.object({
   name: z.string().min(1).max(80).optional(),
-  domain: z.string().min(1).max(255).optional(),
-  chatTheme: z.enum(["system", "light", "dark"]).optional()
+  domain: z.string().min(1).max(255).optional()
 });
 
 const createSiteApiKeySchema = z.object({
@@ -38,10 +26,6 @@ const createSiteApiKeySchema = z.object({
 const siteSetupSchema = z.object({
   name: z.string().min(1).max(80),
   domain: z.string().min(1).max(255)
-});
-
-const completeSiteSetupSchema = z.object({
-  skipDocumentation: z.boolean().optional()
 });
 
 export function registerSiteRoutes(
@@ -70,7 +54,7 @@ export function registerSiteRoutes(
     }
 
     return reply.code(409).send({
-      error: "Create a site setup and complete documentation before creating the site."
+      error: "Create an agent identity setup before creating the identity."
     });
   });
 
@@ -91,14 +75,14 @@ export function registerSiteRoutes(
       createdAt: now,
       updatedAt: now
     } as AtlasProjectDocument;
-    const apiKey = createBarkanApiKey();
+    const apiKey = createAidentityApiKey();
     const apiKeyDocument: ApiKeyDocument = {
       _id: new ObjectId(),
       userId: authContext.user._id,
       projectId: project.projectId,
       keyHash: hashApiKey(apiKey),
       prefix: apiKey.slice(0, 10),
-      name: `${project.name} CLI key`,
+      name: `${project.name} link token`,
       createdAt: now
     } as ApiKeyDocument;
 
@@ -126,72 +110,15 @@ export function registerSiteRoutes(
     return buildSiteSetupState(collections, authContext.user._id, project);
   });
 
-  app.post("/api/site-setups/:projectId/documentation/generate", async (request, reply) => {
-    const authContext = await requireAuth(request, reply, collections, config);
-    if (!authContext) {
-      return;
-    }
-
-    const project = await findOwnedAtlasProject(collections, authContext.user._id, (request.params as { projectId: string }).projectId);
-    if (!project) {
-      return reply.code(404).send({ error: "site setup not found" });
-    }
-
-    if (!getAtlasAgentStatus(project.projectId).connected) {
-      return reply.code(409).send({ error: "Run npx barkan connect from the client codebase before generating documentation." });
-    }
-
-    if (!config.OPENAI_API_KEY) {
-      return reply.code(503).send({ error: "Atlas AI route map generation is not configured" });
-    }
-
-    const corsHeaders = buildTrustedDashboardCorsHeaders(request.headers.origin, config);
-    reply.hijack();
-    reply.raw.writeHead(200, {
-      "content-type": "text/event-stream; charset=utf-8",
-      "cache-control": "no-cache, no-transform",
-      connection: "keep-alive",
-      ...corsHeaders
-    });
-
-    const sendEvent = (event: string, data: Record<string, unknown>) => {
-      reply.raw.write(`event: ${event}\n`);
-      reply.raw.write(`data: ${JSON.stringify(data)}\n\n`);
-    };
-
-    try {
-      const documentationBundle = await generateDocumentationWithAgent({
-        projectId: project.projectId,
-        onEvent: (event) => sendEvent(event.type, event)
-      });
-
-      await saveAtlasDocumentationBundle(collections, authContext.user._id, project.projectId, documentationBundle);
-      sendEvent("completed", {
-        documentation: documentationBundle.routeMap,
-        backendDocumentation: documentationBundle.backendInventory
-      });
-    } catch (error) {
-      sendEvent("error", { error: `Atlas documentation generation failed: ${getErrorMessage(error)}` });
-    } finally {
-      reply.raw.end();
-    }
-  });
-
   app.post("/api/site-setups/:projectId/complete", async (request, reply) => {
     const authContext = await requireAuth(request, reply, collections, config);
     if (!authContext) {
       return;
     }
 
-    const payload = completeSiteSetupSchema.parse(request.body ?? {});
     const project = await findOwnedAtlasProject(collections, authContext.user._id, (request.params as { projectId: string }).projectId);
     if (!project) {
       return reply.code(404).send({ error: "site setup not found" });
-    }
-
-    const existingDocumentation = await loadAtlasDocumentationParts(collections, authContext.user._id, project.projectId);
-    if (!payload.skipDocumentation && !existingDocumentation.documentation) {
-      return reply.code(409).send({ error: "Generate documentation before creating the site." });
     }
 
     const existingSite = project.siteId
@@ -207,15 +134,12 @@ export function registerSiteRoutes(
       { $set: { siteId: site._id } }
     );
 
-    return serializeSiteDetail(
-      site,
-      buildSnippet(config.PUBLIC_API_URL, site.publicSiteKey),
-      await collections.apiKeys
-        .find({ userId: authContext.user._id, siteId: site._id })
-        .sort({ createdAt: -1 })
-        .toArray(),
-      await loadSiteDocumentationState(collections, authContext.user._id, site._id)
-    );
+    const apiKeys = await collections.apiKeys
+      .find({ userId: authContext.user._id, siteId: site._id })
+      .sort({ createdAt: -1 })
+      .toArray();
+
+    return serializeSiteDetail(site, apiKeys);
   });
 
   app.get("/api/sites/:siteId", async (request, reply) => {
@@ -224,16 +148,7 @@ export function registerSiteRoutes(
       return;
     }
 
-    const siteId = parseObjectId((request.params as { siteId: string }).siteId);
-    if (!siteId) {
-      return reply.code(404).send({ error: "site not found" });
-    }
-
-    const site = await collections.sites.findOne({
-      _id: siteId,
-      ownerUserId: authContext.user._id
-    });
-
+    const site = await findOwnedSite(collections, authContext.user._id, (request.params as { siteId: string }).siteId);
     if (!site) {
       return reply.code(404).send({ error: "site not found" });
     }
@@ -242,76 +157,8 @@ export function registerSiteRoutes(
       .find({ userId: authContext.user._id, siteId: site._id })
       .sort({ createdAt: -1 })
       .toArray();
-    const documentationState = await loadSiteDocumentationState(collections, authContext.user._id, site._id);
 
-    return {
-      site: serializeSite(site),
-      snippet: buildSnippet(config.PUBLIC_API_URL, site.publicSiteKey),
-      apiKeys: apiKeys.map(serializeApiKey),
-      documentation: documentationState.documentation,
-      backendDocumentation: documentationState.backendDocumentation,
-      sourceContext: null,
-      documentationAgent: documentationState.documentationAgent,
-      documentationGeneration: documentationState.documentationGeneration
-    };
-  });
-
-  app.get("/api/sites/:siteId/documentation-agent", async (request, reply) => {
-    const authContext = await requireAuth(request, reply, collections, config);
-    if (!authContext) {
-      return;
-    }
-
-    const siteId = parseObjectId((request.params as { siteId: string }).siteId);
-    if (!siteId) {
-      return reply.code(404).send({ error: "site not found" });
-    }
-
-    const site = await collections.sites.findOne({
-      _id: siteId,
-      ownerUserId: authContext.user._id
-    });
-    if (!site) {
-      return reply.code(404).send({ error: "site not found" });
-    }
-
-    return {
-      documentationAgent: await loadSiteDocumentationAgent(collections, authContext.user._id, site._id)
-    };
-  });
-
-  app.get("/api/atlas/projects/:projectId/documentation", async (request, reply) => {
-    const authContext = await requireAuth(request, reply, collections, config);
-    if (!authContext) {
-      return;
-    }
-
-    const projectId = (request.params as { projectId: string }).projectId;
-    const atlasProject = await collections.atlasProjects.findOne({
-      ownerUserId: authContext.user._id,
-      projectId
-    });
-
-    if (!atlasProject) {
-      return reply.code(404).send({ error: "Atlas project not found" });
-    }
-
-    const [site, documentationState] = await Promise.all([
-      atlasProject.siteId
-        ? collections.sites.findOne({
-            _id: atlasProject.siteId,
-            ownerUserId: authContext.user._id
-          })
-        : Promise.resolve(null),
-      loadAtlasDocumentationParts(collections, authContext.user._id, atlasProject.projectId)
-    ]);
-
-    return {
-      project: serializeAtlasProject(atlasProject),
-      site: site ? serializeSite(site) : null,
-      documentation: documentationState.documentation,
-      backendDocumentation: documentationState.backendDocumentation
-    };
+    return serializeSiteDetail(site, apiKeys);
   });
 
   app.patch("/api/sites/:siteId", async (request, reply) => {
@@ -336,10 +183,6 @@ export function registerSiteRoutes(
       update.domain = normalizeDomain(payload.domain);
     }
 
-    if (payload.chatTheme) {
-      update.chatTheme = payload.chatTheme;
-    }
-
     const result = await collections.sites.findOneAndUpdate(
       { _id: siteId, ownerUserId: authContext.user._id },
       { $set: update },
@@ -350,75 +193,7 @@ export function registerSiteRoutes(
       return reply.code(404).send({ error: "site not found" });
     }
 
-    return { site: serializeSite(result), snippet: buildSnippet(config.PUBLIC_API_URL, result.publicSiteKey) };
-  });
-
-  app.post("/api/sites/:siteId/documentation/generate", async (request, reply) => {
-    const authContext = await requireAuth(request, reply, collections, config);
-    if (!authContext) {
-      return;
-    }
-
-    const siteId = parseObjectId((request.params as { siteId: string }).siteId);
-    if (!siteId) {
-      return reply.code(404).send({ error: "site not found" });
-    }
-
-    const site = await collections.sites.findOne({
-      _id: siteId,
-      ownerUserId: authContext.user._id
-    });
-    if (!site) {
-      return reply.code(404).send({ error: "site not found" });
-    }
-
-    const atlasProject = await collections.atlasProjects.findOne({
-      ownerUserId: authContext.user._id,
-      siteId: site._id
-    });
-    if (!atlasProject) {
-      return reply.code(409).send({ error: "Connect to your codebase with npx barkan connect before generating documentation." });
-    }
-
-    if (!getAtlasAgentStatus(atlasProject.projectId).connected) {
-      return reply.code(409).send({ error: "Run npx barkan connect from the client codebase before generating documentation." });
-    }
-
-    if (!config.OPENAI_API_KEY) {
-      return reply.code(503).send({ error: "Atlas AI route map generation is not configured" });
-    }
-
-    const corsHeaders = buildTrustedDashboardCorsHeaders(request.headers.origin, config);
-    reply.hijack();
-    reply.raw.writeHead(200, {
-      "content-type": "text/event-stream; charset=utf-8",
-      "cache-control": "no-cache, no-transform",
-      connection: "keep-alive",
-      ...corsHeaders
-    });
-
-    const sendEvent = (event: string, data: Record<string, unknown>) => {
-      reply.raw.write(`event: ${event}\n`);
-      reply.raw.write(`data: ${JSON.stringify(data)}\n\n`);
-    };
-
-    try {
-      const documentationBundle = await generateDocumentationWithAgent({
-        projectId: atlasProject.projectId,
-        onEvent: (event) => sendEvent(event.type, event)
-      });
-
-      await saveAtlasDocumentationBundle(collections, authContext.user._id, atlasProject.projectId, documentationBundle);
-
-      sendEvent("completed", {
-        documentation: documentationBundle.routeMap,
-        backendDocumentation: documentationBundle.backendInventory
-      });
-    } catch (error) {
-      sendEvent("error", { error: `Atlas documentation generation failed: ${getErrorMessage(error)}` });
-    } finally {
-      reply.raw.end();
-    }
+    return { site: serializeSite(result) };
   });
 
   app.delete("/api/sites/:siteId", async (request, reply) => {
@@ -427,24 +202,10 @@ export function registerSiteRoutes(
       return;
     }
 
-    const siteId = parseObjectId((request.params as { siteId: string }).siteId);
-    if (!siteId) {
-      return reply.code(404).send({ error: "site not found" });
-    }
-
-    const site = await collections.sites.findOne({
-      _id: siteId,
-      ownerUserId: authContext.user._id
-    });
-
+    const site = await findOwnedSite(collections, authContext.user._id, (request.params as { siteId: string }).siteId);
     if (!site) {
       return reply.code(404).send({ error: "site not found" });
     }
-
-    const atlasProjects = await collections.atlasProjects
-      .find({ ownerUserId: authContext.user._id, siteId: site._id })
-      .toArray();
-    const atlasProjectIds = atlasProjects.map((project) => project.projectId);
 
     const deleteResult = await collections.sites.deleteOne({
       _id: site._id,
@@ -458,13 +219,7 @@ export function registerSiteRoutes(
     await Promise.all([
       collections.apiKeys.deleteMany({ userId: authContext.user._id, siteId: site._id }),
       collections.atlasProjects.deleteMany({ ownerUserId: authContext.user._id, siteId: site._id }),
-      collections.interactionLogs.deleteMany({ siteId: site._id }),
-      atlasProjectIds.length > 0
-        ? collections.atlasDocuments.deleteMany({
-            ownerUserId: authContext.user._id,
-            projectId: { $in: atlasProjectIds }
-          })
-        : Promise.resolve()
+      collections.interactionLogs.deleteMany({ siteId: site._id })
     ]);
 
     return { ok: true };
@@ -476,24 +231,16 @@ export function registerSiteRoutes(
       return;
     }
 
-    const siteId = parseObjectId((request.params as { siteId: string }).siteId);
-    if (!siteId) {
-      return reply.code(404).send({ error: "site not found" });
-    }
-
-    const site = await collections.sites.findOne({
-      _id: siteId,
-      ownerUserId: authContext.user._id
-    });
-
+    const site = await findOwnedSite(collections, authContext.user._id, (request.params as { siteId: string }).siteId);
     if (!site) {
       return reply.code(404).send({ error: "site not found" });
     }
 
     const payload = createSiteApiKeySchema.parse(request.body ?? {});
     const atlasProject = await findOrCreateSiteAtlasProject(collections, site);
-    const apiKey = createBarkanApiKey();
+    const apiKey = createAidentityApiKey();
     const now = new Date();
+    const name = payload.name?.trim() || `${site.name} link token`;
     const insertResult = await collections.apiKeys.insertOne({
       _id: new ObjectId(),
       userId: authContext.user._id,
@@ -501,14 +248,14 @@ export function registerSiteRoutes(
       projectId: atlasProject.projectId,
       keyHash: hashApiKey(apiKey),
       prefix: apiKey.slice(0, 10),
-      name: payload.name?.trim() || `${site.name} CLI key`,
+      name,
       createdAt: now
     });
 
     return reply.code(201).send({
       apiKey: {
         id: String(insertResult.insertedId),
-        name: payload.name?.trim() || `${site.name} CLI key`,
+        name,
         prefix: apiKey.slice(0, 10),
         createdAt: now.toISOString(),
         lastUsedAt: null
@@ -530,7 +277,7 @@ export function registerSiteRoutes(
     const siteId = parseObjectId(siteIdParam);
     const apiKeyId = parseObjectId(apiKeyIdParam);
     if (!siteId || !apiKeyId) {
-      return reply.code(404).send({ error: "API key not found" });
+      return reply.code(404).send({ error: "link token not found" });
     }
 
     const deleteResult = await collections.apiKeys.deleteOne({
@@ -540,41 +287,17 @@ export function registerSiteRoutes(
     });
 
     if (deleteResult.deletedCount === 0) {
-      return reply.code(404).send({ error: "API key not found" });
+      return reply.code(404).send({ error: "link token not found" });
     }
 
     return { ok: true };
   });
 }
 
-export function buildSnippet(publicApiUrl: string, publicSiteKey: string): string {
-  return `<script async src="${publicApiUrl.replace(/\/$/, "")}/widget.js" data-barkan-site="${publicSiteKey}"></script>`;
-}
-
-function serializeSiteDetail(
-  site: SiteDocument,
-  snippet: string,
-  apiKeys: ApiKeyDocument[],
-  documentationState: {
-    documentation: unknown | null;
-    backendDocumentation: unknown | null;
-    documentationAgent: {
-      projectId: string;
-      connected: boolean;
-      connectedAt: string | null;
-    } | null;
-    documentationGeneration: ReturnType<typeof getAtlasDocumentationGenerationStatus>;
-  }
-) {
+function serializeSiteDetail(site: SiteDocument, apiKeys: ApiKeyDocument[]) {
   return {
     site: serializeSite(site),
-    snippet,
-    apiKeys: apiKeys.map(serializeApiKey),
-    documentation: documentationState.documentation,
-    backendDocumentation: documentationState.backendDocumentation,
-    sourceContext: null,
-    documentationAgent: documentationState.documentationAgent,
-    documentationGeneration: documentationState.documentationGeneration
+    apiKeys: apiKeys.map(serializeApiKey)
   };
 }
 
@@ -593,26 +316,14 @@ async function buildSiteSetupState(
   ownerUserId: ObjectId,
   project: AtlasProjectDocument
 ) {
-  const [documentationState, apiKeys] = await Promise.all([
-    loadAtlasDocumentationParts(collections, ownerUserId, project.projectId),
-    collections.apiKeys
-      .find({ userId: ownerUserId, projectId: project.projectId })
-      .sort({ createdAt: -1 })
-      .toArray()
-  ]);
-  const agentStatus = getAtlasAgentStatus(project.projectId);
+  const apiKeys = await collections.apiKeys
+    .find({ userId: ownerUserId, projectId: project.projectId })
+    .sort({ createdAt: -1 })
+    .toArray();
 
   return {
     setup: serializeSiteSetup(project),
-    apiKeys: apiKeys.map(serializeApiKey),
-    documentation: documentationState.documentation,
-    backendDocumentation: documentationState.backendDocumentation,
-    documentationAgent: {
-      projectId: project.projectId,
-      connected: agentStatus.connected,
-      connectedAt: agentStatus.connectedAt
-    },
-    documentationGeneration: getAtlasDocumentationGenerationStatus(project.projectId)
+    apiKeys: apiKeys.map(serializeApiKey)
   };
 }
 
@@ -622,7 +333,7 @@ async function createSiteFromSetup(
   project: AtlasProjectDocument
 ): Promise<SiteDocument> {
   if (!project.pendingSiteDomain) {
-    throw new Error("Site setup is missing a domain.");
+    throw new Error("Agent identity setup is missing an OpenClaw endpoint.");
   }
 
   const now = new Date();
@@ -633,16 +344,31 @@ async function createSiteFromSetup(
     domain: project.pendingSiteDomain,
     publicSiteKey: createPublicSiteKey(),
     previewImage: createSitePreviewImage(),
-    chatTheme: "system",
     createdAt: now,
     updatedAt: now
   });
   const site = await collections.sites.findOne({ _id: insertResult.insertedId, ownerUserId });
   if (!site) {
-    throw new Error("could not create site");
+    throw new Error("could not create agent identity");
   }
 
   return site;
+}
+
+async function findOwnedSite(
+  collections: Collections,
+  ownerUserId: ObjectId,
+  siteId: string
+): Promise<SiteDocument | null> {
+  const objectId = parseObjectId(siteId);
+  if (!objectId) {
+    return null;
+  }
+
+  return collections.sites.findOne({
+    _id: objectId,
+    ownerUserId
+  });
 }
 
 async function findOwnedAtlasProject(
@@ -660,23 +386,6 @@ async function findOwnedAtlasProject(
   });
 }
 
-async function saveAtlasDocumentationBundle(
-  collections: Collections,
-  ownerUserId: ObjectId,
-  projectId: string,
-  documentation: {
-    routeMap: unknown;
-    backendInventory: unknown;
-  }
-) {
-  await saveAtlasDocumentationObject(
-    collections,
-    ownerUserId,
-    projectId,
-    createAtlasDocumentationObject(documentation)
-  );
-}
-
 function normalizeDomain(domain: string): string {
   return domain
     .trim()
@@ -689,65 +398,6 @@ function parseObjectId(value: string): ObjectId | null {
   return ObjectId.isValid(value) ? new ObjectId(value) : null;
 }
 
-async function loadSiteDocumentationState(
-  collections: Collections,
-  ownerUserId: ObjectId,
-  siteId: ObjectId
-): Promise<{
-  documentation: unknown | null;
-  backendDocumentation: unknown | null;
-  documentationAgent: {
-    projectId: string;
-    connected: boolean;
-    connectedAt: string | null;
-  } | null;
-  documentationGeneration: ReturnType<typeof getAtlasDocumentationGenerationStatus>;
-}> {
-  const atlasProject = await collections.atlasProjects.findOne({
-    ownerUserId,
-    siteId
-  });
-
-  if (!atlasProject) {
-    return { documentation: null, backendDocumentation: null, documentationAgent: null, documentationGeneration: null };
-  }
-
-  const documentationState = await loadAtlasDocumentationParts(collections, ownerUserId, atlasProject.projectId);
-
-  return {
-    documentation: documentationState.documentation,
-    backendDocumentation: documentationState.backendDocumentation,
-    documentationAgent: serializeDocumentationAgentStatus(atlasProject.projectId),
-    documentationGeneration: getAtlasDocumentationGenerationStatus(atlasProject.projectId)
-  };
-}
-
-async function loadSiteDocumentationAgent(
-  collections: Collections,
-  ownerUserId: ObjectId,
-  siteId: ObjectId
-): Promise<{
-  projectId: string;
-  connected: boolean;
-  connectedAt: string | null;
-} | null> {
-  const atlasProject = await collections.atlasProjects.findOne({
-    ownerUserId,
-    siteId
-  });
-
-  return atlasProject ? serializeDocumentationAgentStatus(atlasProject.projectId) : null;
-}
-
-function serializeDocumentationAgentStatus(projectId: string) {
-  const agentStatus = getAtlasAgentStatus(projectId);
-  return {
-    projectId,
-    connected: agentStatus.connected,
-    connectedAt: agentStatus.connectedAt
-  };
-}
-
 function serializeApiKey(apiKey: ApiKeyDocument) {
   return {
     id: String(apiKey._id),
@@ -755,15 +405,6 @@ function serializeApiKey(apiKey: ApiKeyDocument) {
     prefix: apiKey.prefix,
     createdAt: apiKey.createdAt.toISOString(),
     lastUsedAt: apiKey.lastUsedAt ? apiKey.lastUsedAt.toISOString() : null
-  };
-}
-
-function serializeAtlasProject(project: AtlasProjectDocument) {
-  return {
-    id: project.projectId,
-    name: project.name,
-    createdAt: project.createdAt.toISOString(),
-    updatedAt: project.updatedAt.toISOString()
   };
 }
 
@@ -819,8 +460,4 @@ async function repairSiteAtlasProject(
   );
 
   return repairedProject;
-}
-
-function getErrorMessage(error: unknown): string {
-  return error instanceof Error ? error.message : String(error);
 }

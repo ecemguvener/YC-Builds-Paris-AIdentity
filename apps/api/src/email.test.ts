@@ -9,7 +9,7 @@ import { registerIdentityRoutes } from "./identity.js";
 // runs in mock-send mode with heuristic drafting — fully offline.
 const config = {
   PUBLIC_API_URL: "http://localhost:4001",
-  EMAIL_FROM_DOMAIN: "agents.barkan.dev"
+  EMAIL_FROM_DOMAIN: "agents.aidentity.dev"
 } as unknown as AppConfig;
 
 async function buildTestApp() {
@@ -255,7 +255,7 @@ describe("email capability routes", () => {
     const inbound = await app.inject({
       method: "POST",
       url: "/api/webhooks/email/inbound",
-      payload: { from: "spam@nowhere.com", to: "nobody@agents.barkan.dev", subject: "Hello", text: "..." }
+      payload: { from: "spam@nowhere.com", to: "nobody@agents.aidentity.dev", subject: "Hello", text: "..." }
     });
     expect(inbound.statusCode).toBe(200);
     expect(inbound.json().matched).toBe(false);

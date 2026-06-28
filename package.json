@@ -1,5 +1,5 @@
 {
-  "name": "barkan-web",
+  "name": "aidentity-web",
   "private": true,
   "type": "module",
   "workspaces": [
@@ -8,13 +8,12 @@
   ],
   "scripts": {
     "dev": "bash scripts/dev.sh",
-    "pm2:start-prod-api": "pm2 startOrReload ecosystem.config.cjs --only prod-barkan-api --update-env && pm2 save",
+    "seed:demo": "npm --workspace @aidentity/api run seed:demo",
+    "pm2:start-prod-api": "pm2 startOrReload ecosystem.config.cjs --only prod-aidentity-api --update-env && pm2 save",
     "pm2:list": "pm2 list",
     "build": "npm --workspaces --if-present run build",
-    "deploy:barkan-web": "bash scripts/deploy-barkan-web.sh",
-    "deploy-barkan-web": "npm run deploy:barkan-web",
-    "deploy:barkan-widget": "bash scripts/deploy-barkan-widget.sh",
-    "deploy-barkan-widget": "npm run deploy:barkan-widget",
+    "deploy:aidentity-web": "bash scripts/deploy-aidentity-web.sh",
+    "deploy-aidentity-web": "npm run deploy:aidentity-web",
     "test": "npm --workspaces --if-present run test",
     "lint": "npm --workspaces --if-present run lint"
   },

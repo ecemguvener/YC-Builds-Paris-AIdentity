@@ -30,7 +30,7 @@ const capabilityMeta = {
 const defaultState = {
   identity: null,
   events: [],
-  selectedSnippet: "javascript",
+  selectedSample: "javascript",
   environment: "sandbox"
 };
 
@@ -55,7 +55,7 @@ const els = {
   apiKeyValue: document.querySelector("#apiKeyValue"),
   eventLog: document.querySelector("#eventLog"),
   lastEventState: document.querySelector("#lastEventState"),
-  snippetOutput: document.querySelector("#snippetOutput"),
+  sampleOutput: document.querySelector("#sampleOutput"),
   environmentSelect: document.querySelector("#environmentSelect"),
   toast: document.querySelector("#toast")
 };
@@ -76,9 +76,9 @@ document.querySelectorAll("[data-copy-target]").forEach(button => {
   button.addEventListener("click", () => copyValue(button.dataset.copyTarget));
 });
 
-document.querySelectorAll("[data-snippet]").forEach(tab => {
+document.querySelectorAll("[data-sample]").forEach(tab => {
   tab.addEventListener("click", () => {
-    state.selectedSnippet = tab.dataset.snippet;
+    state.selectedSample = tab.dataset.sample;
     saveState();
     renderSnippets();
     renderTabs();
@@ -299,18 +299,18 @@ function renderSimulatorButtons() {
 }
 
 function renderTabs() {
-  document.querySelectorAll("[data-snippet]").forEach(tab => {
-    const selected = tab.dataset.snippet === state.selectedSnippet;
+  document.querySelectorAll("[data-sample]").forEach(tab => {
+    const selected = tab.dataset.sample === state.selectedSample;
     tab.classList.toggle("is-selected", selected);
     tab.setAttribute("aria-selected", String(selected));
   });
 }
 
 function renderSnippets() {
-  els.snippetOutput.textContent = getSnippet(state.selectedSnippet);
+  els.sampleOutput.textContent = getSample(state.selectedSample);
 }
 
-function getSnippet(kind) {
+function getSample(kind) {
   const identity = state.identity || placeholderIdentity();
   const capabilitiesJson = JSON.stringify(identity.capabilities);
 

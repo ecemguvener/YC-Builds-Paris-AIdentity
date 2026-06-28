@@ -10,14 +10,11 @@ const baseConfig: AppConfig = {
   API_PORT: 4000,
   PUBLIC_APP_URL: "http://localhost:5173",
   PUBLIC_API_URL: "http://localhost:4000",
-  MONGODB_URI: "mongodb://127.0.0.1:27017/barkan-web-test",
-  SESSION_COOKIE_NAME: "barkan_session",
-  SESSION_SECRET: "test-barkan-session-secret",
+  MONGODB_URI: "mongodb://127.0.0.1:27017/aidentity-web-test",
+  SESSION_COOKIE_NAME: "aidentity_session",
+  SESSION_SECRET: "test-aidentity-session-secret",
   ELEVENLABS_VOICE_ID: "voice_test",
   OPENAI_API_KEY: "openai",
-  OPENAI_WIDGET_MODEL: "gpt-5.4-2026-03-05",
-  OPENAI_ACTION_MODEL: "gpt-5.4-2026-03-05",
-  OPENAI_ATLAS_MODEL: "gpt-5.4-2026-03-05"
 };
 
 describe("auth profile routes", () => {
@@ -33,7 +30,7 @@ describe("auth profile routes", () => {
         [baseConfig.SESSION_COOKIE_NAME]: sessionToken
       },
       payload: {
-        displayName: "Max Barkan",
+        displayName: "Max Aidentity",
         email: "MAX@Example.COM",
         avatarUrl: "data:image/png;base64,aGVsbG8="
       }
@@ -42,7 +39,7 @@ describe("auth profile routes", () => {
     expect(response.statusCode).toBe(200);
     expect(response.json().user).toMatchObject({
       id: String(user._id),
-      displayName: "Max Barkan",
+      displayName: "Max Aidentity",
       email: "max@example.com",
       avatarUrl: "data:image/png;base64,aGVsbG8="
     });
@@ -86,7 +83,7 @@ describe("auth profile routes", () => {
       },
       payload: {
         productEmails: false,
-        documentationEmails: true,
+        identityEmails: true,
         securityEmails: false
       }
     });
@@ -94,7 +91,7 @@ describe("auth profile routes", () => {
     expect(response.statusCode).toBe(200);
     expect(response.json().user.notificationPreferences).toEqual({
       productEmails: false,
-      documentationEmails: true,
+      identityEmails: true,
       securityEmails: false
     });
 
@@ -166,11 +163,11 @@ function createCollections({
 async function createUser(password = "password-test"): Promise<UserDocument> {
   return {
     _id: new ObjectId(),
-    email: "dev@barkan.test",
+    email: "dev@aidentity.test",
     displayName: "Dev",
     notificationPreferences: {
       productEmails: true,
-      documentationEmails: true,
+      identityEmails: true,
       securityEmails: true
     },
     passwordHash: await hashPassword(password),

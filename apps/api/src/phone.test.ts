@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { PhoneCallError, placeAgentPhoneCall } from "./phone.js";
+import { PhoneCallError, placeAgentPhoneCall, waitForPhoneCallCompletion } from "./phone.js";
 import type { AppConfig } from "./config.js";
 
 const baseConfig = {
@@ -142,5 +142,63 @@ describe("placeAgentPhoneCall", () => {
     );
     expect(callOpening).not.toContain("ask Alex to call");
     expect(callOpening).not.toContain("calling about call Alex");
+  });
+
+  it("polls ElevenLabs conversation details until transcript completion", async () => {
+    const fetchMock = vi.spyOn(globalThis, "fetch")
+      .mockResolvedValueOnce(
+        new Response(JSON.stringify({ status: "processing", transcript: [] }), { status: 200 })
+      )
+      .mockResolvedValueOnce(
+        new Response(
+          JSON.stringify({
+            status: "done",
+            metadata: { call_duration_secs: 42 },
+            transcript: [
+              { role: "agent", message: "Hello, I am calling about the appointment.", time_in_call_secs: 1 },
+              { role: "user", message: "Yes, 11am works.", time_in_call_secs: 12 }
+            ]
+          }),
+          { status: 200 }
+        )
+      );
+
+    const completion = await waitForPhoneCallCompletion(
+      {
+        ok: true,
+        provider: "elevenlabs",
+        simulated: false,
+        callId: "conv_test",
+        toNumber: "+33757509222",
+        agentIdentityName: "Maxence AI Caller",
+        task: "Book a barber appointment.",
+        status: "started",
+        detail: "started"
+      },
+      {
+        ...baseConfig,
+        ELEVENLABS_API_KEY: "test-key"
+      },
+      {
+        intervalMs: 1,
+        maxWaitMs: 50
+      }
+    );
+
+    expect(fetchMock).toHaveBeenCalledWith(
+      "https://api.elevenlabs.io/v1/convai/conversations/conv_test",
+      expect.objectContaining({
+        method: "GET",
+        headers: { "xi-api-key": "test-key" }
+      })
+    );
+    expect(completion).toEqual({
+      status: "done",
+      durationSecs: 42,
+      transcript: [
+        { role: "agent", message: "Hello, I am calling about the appointment.", timeInCallSecs: 1 },
+        { role: "user", message: "Yes, 11am works.", timeInCallSecs: 12 }
+      ]
+    });
   });
 });

@@ -8,7 +8,7 @@ export interface UserDocument extends Document {
   avatarUrl?: string | null;
   notificationPreferences?: {
     productEmails: boolean;
-    documentationEmails: boolean;
+    identityEmails?: boolean;
     securityEmails: boolean;
   };
   passwordHash: string;
@@ -60,16 +60,6 @@ export interface AtlasProjectDocument extends Document {
   updatedAt: Date;
 }
 
-export interface AtlasDocumentDocument extends Document {
-  _id: ObjectId;
-  ownerUserId: ObjectId;
-  projectId: string;
-  type: "documentation";
-  documentation: unknown;
-  createdAt: Date;
-  updatedAt: Date;
-}
-
 export interface InteractionLogDocument extends Document {
   _id: ObjectId;
   siteId: ObjectId;
@@ -86,7 +76,6 @@ export interface Collections {
   sites: Collection<SiteDocument>;
   apiKeys: Collection<ApiKeyDocument>;
   atlasProjects: Collection<AtlasProjectDocument>;
-  atlasDocuments: Collection<AtlasDocumentDocument>;
   interactionLogs: Collection<InteractionLogDocument>;
 }
 
@@ -106,7 +95,6 @@ export async function connectDatabase(config: AppConfig): Promise<Database> {
     sites: db.collection<SiteDocument>("sites"),
     apiKeys: db.collection<ApiKeyDocument>("apiKeys"),
     atlasProjects: db.collection<AtlasProjectDocument>("atlasProjects"),
-    atlasDocuments: db.collection<AtlasDocumentDocument>("atlasDocuments"),
     interactionLogs: db.collection<InteractionLogDocument>("interactionLogs")
   };
 
@@ -122,8 +110,6 @@ export async function connectDatabase(config: AppConfig): Promise<Database> {
     collections.apiKeys.createIndex({ userId: 1, projectId: 1, createdAt: -1 }),
     collections.atlasProjects.createIndex({ projectId: 1 }, { unique: true }),
     collections.atlasProjects.createIndex({ ownerUserId: 1 }),
-    collections.atlasDocuments.createIndex({ projectId: 1, type: 1 }, { unique: true }),
-    collections.atlasDocuments.createIndex({ ownerUserId: 1, updatedAt: -1 }),
     collections.interactionLogs.createIndex({ siteId: 1, createdAt: -1 })
   ]);
 

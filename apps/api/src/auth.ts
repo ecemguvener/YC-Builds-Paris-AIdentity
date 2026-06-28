@@ -41,7 +41,7 @@ const updateProfileSchema = z.object({
 
 const notificationPreferencesSchema = z.object({
   productEmails: z.boolean(),
-  documentationEmails: z.boolean(),
+  identityEmails: z.boolean(),
   securityEmails: z.boolean()
 });
 
@@ -356,7 +356,7 @@ function serializeUser(user: UserDocument) {
     avatarUrl: user.avatarUrl ?? null,
     notificationPreferences: {
       productEmails: user.notificationPreferences?.productEmails ?? true,
-      documentationEmails: user.notificationPreferences?.documentationEmails ?? true,
+      identityEmails: user.notificationPreferences?.identityEmails ?? true,
       securityEmails: user.notificationPreferences?.securityEmails ?? true
     },
     createdAt: user.createdAt.toISOString()

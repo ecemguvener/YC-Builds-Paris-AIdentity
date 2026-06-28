@@ -37,30 +37,21 @@ import { EmailPanel } from "./components/EmailPanel";
 import { PhonePanel } from "./components/PhonePanel";
 import {
   api,
-  type AtlasBackendInventoryDocument,
-  type AtlasRouteMapDocument,
-  type ChatTheme,
+  type DashboardChatCallEmbed,
   type DashboardChatMessageInput,
-  type DocumentationGenerationResult,
-  type DocumentationAgentStatus,
-  type DocumentationGenerationEvent,
-  type DocumentationGenerationStatus,
-  type DocumentationGenerationStep,
   type Site,
   type SiteApiKey,
-  type SiteBackendDocumentation,
   type SiteDetailResponse,
-  type SiteDocumentation,
   type User
 } from "./api";
-import barkanMarkDark from "./assets/barkan/brand/barkan-mark-dark.svg";
-import barkanMarkLight from "./assets/barkan/brand/barkan-mark-light.svg";
-import sitePreviewBlueFlow from "./assets/barkan/images/site-preview-blue-flow.webp";
-import sitePreviewCoralMint from "./assets/barkan/images/site-preview-coral-mint.webp";
-import sitePreviewCyanMist from "./assets/barkan/images/site-preview-cyan-mist.webp";
-import sitePreviewDashboard from "./assets/barkan/images/site-preview-dashboard.webp";
-import sitePreviewLimeBlue from "./assets/barkan/images/site-preview-lime-blue.webp";
-import sitePreviewLimeViolet from "./assets/barkan/images/site-preview-lime-violet.webp";
+import aidentityMarkDark from "./assets/aidentity/brand/aidentity-mark-dark.svg";
+import aidentityMarkLight from "./assets/aidentity/brand/aidentity-mark-light.svg";
+import sitePreviewBlueFlow from "./assets/aidentity/images/site-preview-blue-flow.webp";
+import sitePreviewCoralMint from "./assets/aidentity/images/site-preview-coral-mint.webp";
+import sitePreviewCyanMist from "./assets/aidentity/images/site-preview-cyan-mist.webp";
+import sitePreviewDashboard from "./assets/aidentity/images/site-preview-dashboard.webp";
+import sitePreviewLimeBlue from "./assets/aidentity/images/site-preview-lime-blue.webp";
+import sitePreviewLimeViolet from "./assets/aidentity/images/site-preview-lime-violet.webp";
 
 const dashboardPath = "/dashboard";
 const dashboardChatPath = `${dashboardPath}/chat`;
@@ -82,25 +73,16 @@ type DashboardChatMessage = {
   role: DashboardChatRole;
   content: string;
   presentation?: "normal" | "activity";
+  callEmbed?: DashboardChatCallEmbed & { state: "in_progress" | "completed" };
   clarificationDetails?: {
     entries: Array<{ question: string; answer: string }>;
   };
 };
-type SiteDetailTab = "credentials" | "installation" | "theme" | "phone" | "payments" | "email" | "documentation";
+type SiteDetailTab = "credentials" | "openclaw" | "phone" | "payments" | "email";
 type UserSettingsSection = "profile" | "security" | "notifications" | "billing";
-type DocumentationView = "frontend" | "backend";
 type PanelState = "active" | "hidden" | "incoming" | "outgoing";
-type DocumentationProgressStep = "connection" | DocumentationGenerationStep;
-type DocumentationStepProgress = Partial<Record<DocumentationProgressStep, { current: number; total: number; label?: string }>>;
-type BackgroundDocumentationGeneration = {
-  projectId: string;
-  siteId: string | null;
-  activeStep: DocumentationProgressStep | null;
-  completedSteps: Set<DocumentationProgressStep>;
-  stepProgress: DocumentationStepProgress;
-  status: "running" | "completed" | "failed";
-  error: string;
-};
+type SetupProgressStep = "connection";
+type SetupStepProgress = Partial<Record<SetupProgressStep, { current: number; total: number; label?: string }>>;
 type StepTransition = {
   from: SiteOnboardingStep;
   to: SiteOnboardingStep;
@@ -123,14 +105,8 @@ const onboardingPanelTransitionDurationMs = 820;
 const onboardingPanelTransitionSwapMs = 300;
 const buttonLoadingDurationMs = 420;
 const requiredFieldMessage = "Please fill in this field.";
-const documentationGenerationSteps: Array<{ id: DocumentationGenerationStep; label: string }> = [
-  { id: "files_selection", label: "Files selection" },
-  { id: "frontend_documentation", label: "Frontend docs" },
-  { id: "backend_documentation", label: "Backend docs" }
-];
-const onboardingDocumentationSteps: Array<{ id: DocumentationProgressStep; label: string }> = [
-  { id: "connection", label: "OpenClaw link" },
-  ...documentationGenerationSteps
+const onboardingSetupSteps: Array<{ id: SetupProgressStep; label: string }> = [
+  { id: "connection", label: "OpenClaw link" }
 ];
 
 function isCompletionOnboardingStep(step: SiteOnboardingStep) {
@@ -153,7 +129,7 @@ const agentIdentityCapabilities = [
   },
   {
     label: "Email",
-    value: "agent@identity.barkan.dev",
+    value: "agent@identity.aidentity.dev",
     description: "Inbox and outbound email identity",
     Icon: Mail
   },
@@ -205,25 +181,25 @@ function buildOpenClawLinkPrompt(identityName: string, token: string | undefined
   const safeToken = token ?? "LINK_TOKEN_PENDING";
   const safeProjectId = projectId ?? "PROJECT_ID_PENDING";
 
-  return `Install the Barkan Agent Identity skill for this OpenClaw instance.
+  return `Install the Aidentity Agent Identity skill for this OpenClaw instance.
 
 Identity name: ${identityName.trim() || "New agent identity"}
 Link endpoint: ${linkEndpoint}
 Project token: ${safeProjectId}
 Confirmation token: ${safeToken}
 
-After installing the skill, call the link endpoint with the confirmation token so Barkan can attach this OpenClaw instance to the identity. Once linked, use the provisioned phone number, email inbox, payment card, calendar, and future real-world tools through the Barkan identity layer.`;
+After installing the skill, call the link endpoint with the confirmation token so Aidentity can attach this OpenClaw instance to the identity. Once linked, use the provisioned phone number, email inbox, payment card, calendar, and future real-world tools through the Aidentity identity layer.`;
 }
 
 function buildIdentityReceipt(site: Site | null): string {
   const identityName = site?.name ?? "Agent identity";
-  const endpoint = site?.domain ?? "managed-openclaw.barkan.dev";
+  const endpoint = site?.domain ?? "managed-openclaw.aidentity.dev";
 
-  return `Barkan Agent Identity
+  return `Aidentity Agent Identity
 name=${identityName}
 openclaw=${endpoint}
 phone=+1-415-555-0198
-email=agent@identity.barkan.dev
+email=agent@identity.aidentity.dev
 card=visa_4242
 calendar=managed`;
 }
@@ -296,9 +272,7 @@ function getSiteDetailRoute(path: string, search = ""): { siteId: string; tab: S
 
   const rawTab = new URLSearchParams(search).get("tab");
   const tab =
-    rawTab === "documentation" ||
-    rawTab === "installation" ||
-    rawTab === "theme" ||
+    rawTab === "openclaw" ||
     rawTab === "phone" ||
     rawTab === "payments" ||
     rawTab === "email"
@@ -374,36 +348,11 @@ function formatSiteRelativeTime(value: string) {
   return `Updated ${elapsedDays}d ago`;
 }
 
-function formatDocumentationTimestamp(value: string | undefined) {
-  if (!value) {
-    return "Not generated yet";
-  }
-
-  const timestamp = new Date(value);
-  if (Number.isNaN(timestamp.getTime())) {
-    return "Generated recently";
-  }
-
-  return `Generated ${timestamp.toLocaleDateString(undefined, {
-    month: "short",
-    day: "numeric",
-    year: "numeric"
-  })}`;
-}
-
 export function App() {
   const [currentLocation, setCurrentLocation] = useState(getCurrentLocation);
   const [user, setUser] = useState<User | null>(null);
   const [sites, setSites] = useState<Site[]>([]);
-  const [selectedSnippet, setSelectedSnippet] = useState("");
   const [selectedApiKeys, setSelectedApiKeys] = useState<SiteApiKey[]>([]);
-  const [selectedDocumentation, setSelectedDocumentation] = useState<SiteDocumentation>(null);
-  const [selectedBackendDocumentation, setSelectedBackendDocumentation] = useState<SiteBackendDocumentation>(null);
-  const [selectedDocumentationAgent, setSelectedDocumentationAgent] = useState<DocumentationAgentStatus | null>(null);
-  const [selectedDocumentationGeneration, setSelectedDocumentationGeneration] = useState<DocumentationGenerationStatus | null>(null);
-  const [backgroundDocumentationGenerations, setBackgroundDocumentationGenerations] = useState<BackgroundDocumentationGeneration[]>([]);
-  const backgroundDocumentationGenerationsRef = useRef<BackgroundDocumentationGeneration[]>([]);
-  const selectedSiteIdRef = useRef<string | null>(null);
   const [notifications, setNotifications] = useState<ToastNotification[]>([]);
   const notificationIdRef = useRef(0);
   const [isLoading, setIsLoading] = useState(true);
@@ -455,34 +404,11 @@ export function App() {
     () => sites.find((site) => site.id === selectedSiteId) ?? null,
     [selectedSiteId, sites]
   );
-  const selectedSiteBackgroundDocumentationGeneration = useMemo(
-    () =>
-      selectedSite
-        ? backgroundDocumentationGenerations.find(
-            (generation) => generation.siteId === selectedSite.id && generation.status === "running"
-          ) ?? null
-        : null,
-    [backgroundDocumentationGenerations, selectedSite]
-  );
-
-  useEffect(() => {
-    backgroundDocumentationGenerationsRef.current = backgroundDocumentationGenerations;
-  }, [backgroundDocumentationGenerations]);
-
-  useEffect(() => {
-    selectedSiteIdRef.current = selectedSiteId;
-  }, [selectedSiteId]);
-
   useEffect(() => {
     if (selectedSite) {
       void loadSiteDetail(selectedSite.id);
     } else {
-      setSelectedSnippet("");
       setSelectedApiKeys([]);
-      setSelectedDocumentation(null);
-      setSelectedBackendDocumentation(null);
-      setSelectedDocumentationAgent(null);
-      setSelectedDocumentationGeneration(null);
     }
   }, [selectedSite?.id]);
 
@@ -531,12 +457,7 @@ export function App() {
     setSites((currentSites) =>
       currentSites.map((currentSite) => (currentSite.id === response.site.id ? response.site : currentSite))
     );
-    setSelectedSnippet(response.snippet);
     setSelectedApiKeys(response.apiKeys);
-    setSelectedDocumentation(response.documentation);
-    setSelectedBackendDocumentation(response.backendDocumentation);
-    setSelectedDocumentationAgent(response.documentationAgent);
-    setSelectedDocumentationGeneration(response.documentationGeneration);
   }
 
   async function handleLogout() {
@@ -548,12 +469,7 @@ export function App() {
       api.markForcedLogout();
       setUser(null);
       setSites([]);
-      setSelectedSnippet("");
       setSelectedApiKeys([]);
-      setSelectedDocumentation(null);
-      setSelectedBackendDocumentation(null);
-      setSelectedDocumentationAgent(null);
-      setSelectedDocumentationGeneration(null);
       navigateToPublicHome();
     }
   }
@@ -583,20 +499,12 @@ export function App() {
     if (!refreshedSites.some((site) => site.id === detail.site.id)) {
       setSites([detail.site, ...refreshedSites]);
     }
-    setSelectedSnippet("");
     setSelectedApiKeys([]);
-    setSelectedDocumentation(null);
-    setSelectedBackendDocumentation(null);
-    setSelectedDocumentationAgent(null);
-    setSelectedDocumentationGeneration(null);
     replacePath(dashboardPath);
   }
 
-  function handleSiteUpdated(site: Site, snippet?: string) {
+  function handleSiteUpdated(site: Site) {
     setSites((currentSites) => currentSites.map((currentSite) => (currentSite.id === site.id ? site : currentSite)));
-    if (snippet !== undefined) {
-      setSelectedSnippet(snippet);
-    }
   }
 
   function dismissNotification(notificationId: string) {
@@ -621,122 +529,9 @@ export function App() {
     window.setTimeout(() => dismissNotification(id), durationMs);
   }
 
-  function handleBackgroundDocumentationGenerationStarted(projectId: string) {
-    const nextGeneration: BackgroundDocumentationGeneration = {
-      projectId,
-      siteId: null,
-      activeStep: "connection",
-      completedSteps: new Set(["connection"]),
-      stepProgress: {
-        connection: { current: 1, total: 1, label: "Connected" }
-      },
-      status: "running",
-      error: ""
-    };
-    backgroundDocumentationGenerationsRef.current = [
-      ...backgroundDocumentationGenerationsRef.current.filter((generation) => generation.projectId !== projectId),
-      nextGeneration
-    ];
-    setBackgroundDocumentationGenerations((currentGenerations) => [
-      ...currentGenerations.filter((generation) => generation.projectId !== projectId),
-      nextGeneration
-    ]);
-  }
-
-  function handleBackgroundDocumentationGenerationSiteLinked(projectId: string, siteId: string) {
-    backgroundDocumentationGenerationsRef.current = backgroundDocumentationGenerationsRef.current.map((generation) =>
-      generation.projectId === projectId ? { ...generation, siteId } : generation
-    );
-    setBackgroundDocumentationGenerations((currentGenerations) =>
-      currentGenerations.map((generation) =>
-        generation.projectId === projectId ? { ...generation, siteId } : generation
-      )
-    );
-  }
-
-  function handleBackgroundDocumentationGenerationEvent(projectId: string, event: DocumentationGenerationEvent) {
-    setBackgroundDocumentationGenerations((currentGenerations) =>
-      currentGenerations.map((generation) => {
-        if (generation.projectId !== projectId || generation.status !== "running") {
-          return generation;
-        }
-
-        if (event.type === "step_started") {
-          return {
-            ...generation,
-            activeStep: event.step,
-            stepProgress: typeof event.total === "number"
-              ? {
-                  ...generation.stepProgress,
-                  [event.step]: { current: 0, total: event.total }
-                }
-              : generation.stepProgress
-          };
-        }
-
-        if (event.type === "step_progress") {
-          return {
-            ...generation,
-            activeStep: event.step,
-            stepProgress: {
-              ...generation.stepProgress,
-              [event.step]: { current: event.current, total: event.total, label: event.label }
-            }
-          };
-        }
-
-        if (event.type === "step_completed") {
-          return {
-            ...generation,
-            completedSteps: new Set([...generation.completedSteps, event.step]),
-            stepProgress: typeof event.current === "number" && typeof event.total === "number"
-              ? {
-                  ...generation.stepProgress,
-                  [event.step]: { current: event.current, total: event.total }
-                }
-              : generation.stepProgress
-          };
-        }
-
-        return generation;
-      })
-    );
-  }
-
-  function handleBackgroundDocumentationGenerationCompleted(projectId: string, result: DocumentationGenerationResult) {
-    const generation = backgroundDocumentationGenerationsRef.current.find((currentGeneration) => currentGeneration.projectId === projectId);
-    if (generation?.siteId && selectedSiteIdRef.current === generation.siteId) {
-      setSelectedDocumentation(result.documentation);
-      setSelectedBackendDocumentation(result.backendDocumentation);
-      setSelectedDocumentationGeneration(null);
-    }
-
-    setBackgroundDocumentationGenerations((currentGenerations) =>
-      currentGenerations.filter((currentGeneration) => currentGeneration.projectId !== projectId)
-    );
-    backgroundDocumentationGenerationsRef.current = backgroundDocumentationGenerationsRef.current.filter(
-      (currentGeneration) => currentGeneration.projectId !== projectId
-    );
-  }
-
-  function handleBackgroundDocumentationGenerationFailed(projectId: string, error: string) {
-    setBackgroundDocumentationGenerations((currentGenerations) =>
-      currentGenerations.map((generation) =>
-        generation.projectId === projectId
-          ? { ...generation, status: "failed", activeStep: null, error }
-          : generation
-      )
-    );
-  }
-
   function handleSiteDeleted(siteId: string) {
     setSites((currentSites) => currentSites.filter((site) => site.id !== siteId));
-    setSelectedSnippet("");
     setSelectedApiKeys([]);
-    setSelectedDocumentation(null);
-    setSelectedBackendDocumentation(null);
-    setSelectedDocumentationAgent(null);
-    setSelectedDocumentationGeneration(null);
     replacePath(dashboardPath);
   }
 
@@ -750,8 +545,8 @@ export function App() {
 
   if (isLoading) {
     return (
-      <main className="barkan-loading" aria-label="Loading Barkan">
-        <Loader2 className="barkan-loading__spinner" aria-hidden="true" />
+      <main className="aidentity-loading" aria-label="Loading Aidentity">
+        <Loader2 className="aidentity-loading__spinner" aria-hidden="true" />
       </main>
     );
   }
@@ -777,11 +572,6 @@ export function App() {
         <SiteOnboardingScreen
           onCancel={() => replacePath(dashboardPath)}
           onCreated={handleSiteCreated}
-          onDocumentationGenerationStarted={handleBackgroundDocumentationGenerationStarted}
-          onDocumentationGenerationSiteLinked={handleBackgroundDocumentationGenerationSiteLinked}
-          onDocumentationGenerationEvent={handleBackgroundDocumentationGenerationEvent}
-          onDocumentationGenerationCompleted={handleBackgroundDocumentationGenerationCompleted}
-          onDocumentationGenerationFailed={handleBackgroundDocumentationGenerationFailed}
         />
         <ToastNotifications notifications={notifications} />
       </>
@@ -798,13 +588,7 @@ export function App() {
         activeSection={activeDashboardSection}
         activeSiteDetailTab={activeSiteDetailTab}
         activeUserSettingsSection={activeUserSettingsSection}
-        selectedSnippet={selectedSnippet}
         selectedApiKeys={selectedApiKeys}
-        selectedDocumentation={selectedDocumentation}
-        selectedBackendDocumentation={selectedBackendDocumentation}
-        selectedDocumentationAgent={selectedDocumentationAgent}
-        selectedDocumentationGeneration={selectedDocumentationGeneration}
-        selectedBackgroundDocumentationGeneration={selectedSiteBackgroundDocumentationGeneration}
         onCreateSite={() => pushPath(newSitePath)}
         onLogout={handleLogout}
         onSelectSite={(siteId) => pushPath(getSiteDetailPath(siteId, "credentials"))}
@@ -818,23 +602,12 @@ export function App() {
         onApiKeyDeleted={(apiKeyId) =>
           setSelectedApiKeys((currentApiKeys) => currentApiKeys.filter((apiKey) => apiKey.id !== apiKeyId))
         }
-        onDocumentationGenerated={(result) => {
-          setSelectedDocumentation(result.documentation);
-          setSelectedBackendDocumentation(result.backendDocumentation);
-          setSelectedDocumentationGeneration(null);
-        }}
-        onDocumentationAgentLoaded={setSelectedDocumentationAgent}
         onSiteDetailLoaded={applySiteDetailResponse}
         onSiteUpdated={handleSiteUpdated}
         onSiteDeleted={handleSiteDeleted}
         onNotify={showNotification}
         onCloseDetail={() => {
-          setSelectedSnippet("");
           setSelectedApiKeys([]);
-          setSelectedDocumentation(null);
-          setSelectedBackendDocumentation(null);
-          setSelectedDocumentationAgent(null);
-          setSelectedDocumentationGeneration(null);
           replacePath(dashboardPath);
         }}
       />
@@ -882,25 +655,25 @@ const heroTitleWordVariants: Variants = {
 
 const landingFeatureCards = [
   {
-    title: "Guided product assistance",
+    title: "Real-world agent identity",
     description:
-      "Help users navigate your product through chat or voice. Barkan understands your interface and can point users to the right pages, buttons, and workflows in real time.",
+      "Give each AI worker a durable identity with a phone number, inbox, payment rail, calendar, and policy controls your team can audit.",
     image: sitePreviewCyanMist,
     imageAlt: "Blurred product landscape preview",
     imagePosition: "left"
   },
   {
-    title: "Direct action execution",
+    title: "OpenClaw runtime linking",
     description:
-      "Users can tell Barkan what they want done, and it completes the work inside your product. From creating records to updating workflows, Barkan turns intent into action.",
+      "Link an identity to an OpenClaw runtime so the agent can operate with scoped credentials, clear ownership, and current tool state.",
     image: sitePreviewCoralMint,
     imageAlt: "Blurred workflow landscape preview",
     imagePosition: "right"
   },
   {
-    title: "Workflow automation",
+    title: "Operational tool surface",
     description:
-      "Barkan can automate multi-step workflows across your product. Users can describe recurring processes in plain language, and Barkan handles them automatically in the background.",
+      "Simulate, review, and provision calls, email, payments, and scheduling from the dashboard before wiring an agent into production.",
     image: sitePreviewLimeBlue,
     imageAlt: "Blurred automation landscape preview",
     imagePosition: "left"
@@ -909,33 +682,33 @@ const landingFeatureCards = [
 
 const landingBenefitCards = [
   {
-    title: "Full codebase understanding",
-    description: "AI that understands your entire product, frontend, backend, APIs, and workflows, not just a single page.",
+    title: "Identity-first controls",
+    description: "Manage the real-world capabilities an agent can use from a dedicated identity and operations dashboard.",
     Icon: Target
   },
   {
-    title: "Works out of the box",
-    description: "Install once and instantly turn your SaaS into an AI-native product. No rebuild required.",
+    title: "OpenClaw ready",
+    description: "Create link tokens for existing OpenClaw instances or prepare a managed setup from the same onboarding flow.",
     Icon: Box
   },
   {
-    title: "Your code stays yours",
-    description: "Runs inside your existing stack and infrastructure. No need to replace your architecture.",
+    title: "Your runtime stays yours",
+    description: "Keep agent execution in your chosen infrastructure while Aidentity manages the identity and operational tool layer.",
     Icon: LockKeyhole
   },
   {
-    title: "Instant execution",
-    description: "Users can ask, automate, and execute actions in seconds, directly inside your product.",
+    title: "Dashboard simulation",
+    description: "Use the dashboard chat and tool panels to test how an identity handles calls, email, payments, and scheduling.",
     Icon: Zap
   },
   {
-    title: "Every workflow your users need",
-    description: "From onboarding to advanced operations, Barkan understands and executes complex product workflows.",
+    title: "Policy-shaped actions",
+    description: "Keep sensitive capabilities visible and bounded, from payment thresholds to communication identities.",
     Icon: Braces
   },
   {
-    title: "Add AI without rebuilding everything",
-    description: "Embed guidance, actions, and automations into your SaaS with a single executive AI layer.",
+    title: "Agent operations hub",
+    description: "Bring identity setup, OpenClaw linking, credentials, and real-world tool status into one focused dashboard.",
     Icon: Sparkles
   }
 ] as const;
@@ -945,52 +718,52 @@ const pricingPlans = [
     name: "Launch",
     price: "$300",
     priceNote: "per month, depending on usage",
-    description: "For early SaaS teams adding AI guidance and voice assistance to one core product.",
-    features: ["1 connected site", "Typical usage for a small customer base", "Guided chat and voice assistance", "Route documentation generation"],
+    description: "For early teams giving one agent identity real-world communication and payment tools.",
+    features: ["1 agent identity", "Typical usage for a small customer base", "Dashboard chat and phone assistance", "OpenClaw identity linking"],
     isRecommended: false
   },
   {
     name: "Growth",
     price: "$900",
     priceNote: "per month, depending on usage",
-    description: "For growing SaaS teams that want Barkan to guide users and execute common product workflows.",
-    features: ["Multiple connected sites", "Higher assisted-session volume", "Action Mode for documented workflows", "Priority documentation regeneration"],
+    description: "For growing teams managing multiple agent identities and operational tool surfaces.",
+    features: ["Multiple agent identities", "Higher tool usage volume", "Phone, email, and payment tools", "Priority identity support"],
     isRecommended: true
   },
   {
     name: "Enterprise",
     price: "Custom",
     priceNote: "based on volume, integrations, and support needs",
-    description: "For teams rolling Barkan across larger products, support operations, and custom workflows.",
+    description: "For teams rolling Aidentity identities across larger operations and custom agent runtimes.",
     features: ["Volume-based usage planning", "Custom integrations and rollout help", "Dedicated support path", "Advanced workflow coverage"],
     isRecommended: false
   }
 ] as const;
 
 const pricingComparisonRows = [
-  { feature: "Connected sites", launch: "1 site", growth: "Multiple sites", enterprise: "Custom rollout" },
+  { feature: "Agent identities", launch: "1 identity", growth: "Multiple identities", enterprise: "Custom rollout" },
   { feature: "Assisted sessions", launch: "Small-business usage", growth: "Growing product usage", enterprise: "Volume planning" },
-  { feature: "Action execution", launch: "Core workflows", growth: "Expanded workflow coverage", enterprise: "Custom workflow scope" },
-  { feature: "Documentation refreshes", launch: "On demand", growth: "Priority regeneration", enterprise: "Managed support" },
+  { feature: "Real-world tools", launch: "Core tools", growth: "Expanded tool coverage", enterprise: "Custom tool scope" },
+  { feature: "OpenClaw setup", launch: "Prompt-based link", growth: "Managed support", enterprise: "Custom runtime support" },
   { feature: "Support", launch: "Standard support", growth: "Priority support", enterprise: "Dedicated support path" },
-  { feature: "Integrations", launch: "Standard widget setup", growth: "Product workflow guidance", enterprise: "Custom integrations" }
+  { feature: "Integrations", launch: "Standard identity setup", growth: "Runtime guidance", enterprise: "Custom integrations" }
 ] as const;
 
 const pricingFaqItems = [
   {
     question: "Why does pricing depend on usage?",
     answer:
-      "Barkan usage depends on how many users receive assistance, how often voice is used, and how many workflows the agent executes inside your product."
+      "Aidentity usage depends on how many identities you run, how often voice and email are used, and how many real-world tool events the agent triggers."
   },
   {
     question: "What counts as usage?",
     answer:
-      "Typical usage includes assisted chat or voice sessions, action-mode requests, documentation regeneration, and the scale of connected product surfaces."
+      "Typical usage includes dashboard chat, phone calls, email sends, payment requests, and the scale of connected agent identities."
   },
   {
     question: "How long does setup take?",
     answer:
-      "Most teams start by connecting a codebase, generating documentation, and installing the widget snippet on their product."
+      "Most teams start by creating an agent identity, linking OpenClaw, and testing phone, email, and payment tools from the dashboard."
   },
   {
     question: "Can we switch plans later?",
@@ -1165,8 +938,8 @@ function LandingPage() {
   }, []);
 
   return (
-    <main className="barkan-loading" aria-label="Loading Barkan homepage">
-      <Loader2 className="barkan-loading__spinner" aria-hidden="true" />
+    <main className="aidentity-loading" aria-label="Loading Aidentity homepage">
+      <Loader2 className="aidentity-loading__spinner" aria-hidden="true" />
     </main>
   );
 }
@@ -1323,10 +1096,10 @@ function PublicSiteNav({ page }: { page: "landing" | "pricing" }) {
   const closeMenu = () => setIsMenuOpen(false);
 
   return (
-    <header className="landing-page__nav" aria-label="Barkan navigation">
+    <header className="landing-page__nav" aria-label="Aidentity navigation">
       <a className="landing-page__brand" href="/" onClick={closeMenu}>
-        <img className="landing-page__brand-mark" src={barkanMarkLight} alt="" aria-hidden="true" />
-        <span>Barkan</span>
+        <img className="landing-page__brand-mark" src={aidentityMarkLight} alt="" aria-hidden="true" />
+        <span>Aidentity</span>
       </a>
       <button
         className="landing-page__menu-button"
@@ -1360,7 +1133,7 @@ function PublicSiteNav({ page }: { page: "landing" | "pricing" }) {
 
 function PublicSiteFooter() {
   return (
-    <footer className="public-site-footer" aria-label="Barkan footer">
+    <footer className="public-site-footer" aria-label="Aidentity footer">
       <svg
         className="public-site-footer__wordmark"
         viewBox="0 0 100 16"
@@ -1368,7 +1141,7 @@ function PublicSiteFooter() {
         focusable="false"
       >
         <text x="50" y="15" textAnchor="middle" textLength="100" lengthAdjust="spacingAndGlyphs">
-          BARKAN
+          AIDENTITY
         </text>
       </svg>
     </footer>
@@ -1383,7 +1156,7 @@ function LandingFeatureCards() {
 
   return (
     <section className="landing-page__features" id="features" aria-labelledby="landingFeaturesTitle">
-      <p className="landing-page__section-kicker">// How Barkan works</p>
+      <p className="landing-page__section-kicker">// How Aidentity works</p>
       <div className="landing-page__feature-stack">
         {landingFeatureCards.map((card, index) => (
           <LandingFeatureCard
@@ -1412,7 +1185,7 @@ function LandingBenefits() {
       >
         <p className="landing-page__section-kicker">// Benefits</p>
         <h2 className="landing-page__benefits-title" id="landingBenefitsTitle">
-          Turn every SaaS into an AI-native product.
+          Give every agent a real-world operating identity.
         </h2>
       </motion.div>
 
@@ -1561,19 +1334,19 @@ function AnimatedPricingTitle() {
 
 function Brand({
   className = "",
-  label = "Barkan",
+  label = "Aidentity",
   theme = "light"
 }: {
   className?: string;
   label?: string;
   theme?: "light" | "dark";
 }) {
-  const markSrc = barkanMarkDark;
+  const markSrc = aidentityMarkDark;
 
   return (
-    <div className={`barkan-brand barkan-brand--${theme} ${className}`} aria-label={label}>
-      <img className="barkan-brand__mark" src={markSrc} alt="" aria-hidden="true" />
-      <span className="barkan-brand__name">{label}</span>
+    <div className={`aidentity-brand aidentity-brand--${theme} ${className}`} aria-label={label}>
+      <img className="aidentity-brand__mark" src={markSrc} alt="" aria-hidden="true" />
+      <span className="aidentity-brand__name">{label}</span>
     </div>
   );
 }
@@ -1746,7 +1519,7 @@ function AuthScreen({
                   disabled={isEmailSubmitting}
                   aria-busy={isEmailSubmitting}
                 >
-                  {isEmailSubmitting ? <span className="barkan-button-loader" aria-hidden="true" /> : <span>Continue</span>}
+                  {isEmailSubmitting ? <span className="aidentity-button-loader" aria-hidden="true" /> : <span>Continue</span>}
                 </button>
               </form>
             </div>
@@ -1763,7 +1536,7 @@ function AuthScreen({
                       Continue as <span>{email}</span>
                     </>
                   ) : (
-                    "Use at least 8 characters to secure your Barkan workspace."
+                    "Use at least 8 characters to secure your Aidentity workspace."
                   )}
                 </p>
               </header>
@@ -1789,7 +1562,7 @@ function AuthScreen({
                   disabled={isSubmitting}
                   aria-busy={isSubmitting}
                 >
-                  {isSubmitting ? <span className="barkan-button-loader" aria-hidden="true" /> : <span>Continue</span>}
+                  {isSubmitting ? <span className="aidentity-button-loader" aria-hidden="true" /> : <span>Continue</span>}
                 </button>
               </form>
 
@@ -1889,13 +1662,7 @@ function DashboardScreen({
   activeSection,
   activeSiteDetailTab,
   activeUserSettingsSection,
-  selectedSnippet,
   selectedApiKeys,
-  selectedDocumentation,
-  selectedBackendDocumentation,
-  selectedDocumentationAgent,
-  selectedDocumentationGeneration,
-  selectedBackgroundDocumentationGeneration,
   onCreateSite,
   onLogout,
   onSelectSite,
@@ -1907,8 +1674,6 @@ function DashboardScreen({
   onSiteDetailTabChange,
   onApiKeyCreated,
   onApiKeyDeleted,
-  onDocumentationGenerated,
-  onDocumentationAgentLoaded,
   onSiteDetailLoaded,
   onSiteUpdated,
   onSiteDeleted,
@@ -1922,13 +1687,7 @@ function DashboardScreen({
   activeSection: DashboardSection;
   activeSiteDetailTab: SiteDetailTab;
   activeUserSettingsSection: UserSettingsSection;
-  selectedSnippet: string;
   selectedApiKeys: SiteApiKey[];
-  selectedDocumentation: SiteDocumentation;
-  selectedBackendDocumentation: SiteBackendDocumentation;
-  selectedDocumentationAgent: DocumentationAgentStatus | null;
-  selectedDocumentationGeneration: DocumentationGenerationStatus | null;
-  selectedBackgroundDocumentationGeneration: BackgroundDocumentationGeneration | null;
   onCreateSite: () => void;
   onLogout: () => void;
   onSelectSite: (siteId: string) => void;
@@ -1940,10 +1699,8 @@ function DashboardScreen({
   onSiteDetailTabChange: (siteId: string, tab: SiteDetailTab) => void;
   onApiKeyCreated: (apiKey: SiteApiKey) => void;
   onApiKeyDeleted: (apiKeyId: string) => void;
-  onDocumentationGenerated: (result: DocumentationGenerationResult) => void;
-  onDocumentationAgentLoaded: (agent: DocumentationAgentStatus | null) => void;
   onSiteDetailLoaded: (detail: SiteDetailResponse) => void;
-  onSiteUpdated: (site: Site, snippet?: string) => void;
+  onSiteUpdated: (site: Site) => void;
   onSiteDeleted: (siteId: string) => void;
   onNotify: (notification: ToastNotificationInput) => void;
   onCloseDetail: () => void;
@@ -2014,17 +1771,9 @@ function DashboardScreen({
         <SiteDetailOverlay
           site={selectedSite}
           activeTab={activeSiteDetailTab}
-          snippet={selectedSnippet}
           apiKeys={selectedApiKeys}
-          documentation={selectedDocumentation}
-          backendDocumentation={selectedBackendDocumentation}
-          documentationAgent={selectedDocumentationAgent}
-          documentationGeneration={selectedDocumentationGeneration}
-          backgroundDocumentationGeneration={selectedBackgroundDocumentationGeneration}
           onApiKeyCreated={onApiKeyCreated}
           onApiKeyDeleted={onApiKeyDeleted}
-          onDocumentationGenerated={onDocumentationGenerated}
-          onDocumentationAgentLoaded={onDocumentationAgentLoaded}
           onSiteDetailLoaded={onSiteDetailLoaded}
           onSiteUpdated={onSiteUpdated}
           onSiteDeleted={onSiteDeleted}
@@ -2158,6 +1907,30 @@ function DashboardChatScreen({ user, sites }: { user: User; sites: Site[] }) {
 
     try {
       await api.sendDashboardChatMessage(toDashboardChatApiMessages(messagesForRequest), (streamEvent) => {
+        if (streamEvent.type === "call_started") {
+          setIsWaitingForFirstToken(false);
+          setMessages((currentMessages) =>
+            currentMessages.map((message) =>
+              message.id === assistantMessage.id
+                ? { ...message, callEmbed: { ...streamEvent.call, state: "in_progress" } }
+                : message
+            )
+          );
+          return;
+        }
+
+        if (streamEvent.type === "call_completed") {
+          setIsWaitingForFirstToken(false);
+          setMessages((currentMessages) =>
+            currentMessages.map((message) =>
+              message.id === assistantMessage.id
+                ? { ...message, callEmbed: { ...streamEvent.call, state: "completed" } }
+                : message
+            )
+          );
+          return;
+        }
+
         if (streamEvent.type !== "delta" || !streamEvent.text) {
           return;
         }
@@ -2173,7 +1946,7 @@ function DashboardChatScreen({ user, sites }: { user: User; sites: Site[] }) {
       setMessages((currentMessages) =>
         currentMessages.filter((message) => message.id !== assistantMessage.id || message.content.trim().length > 0)
       );
-      setChatError(getErrorMessage(error, "Barkan could not answer right now."));
+      setChatError(getErrorMessage(error, "Aidentity could not answer right now."));
     } finally {
       setIsWaitingForFirstToken(false);
       setIsResponding(false);
@@ -2210,7 +1983,7 @@ function DashboardChatScreen({ user, sites }: { user: User; sites: Site[] }) {
                 </div>
               ) : (
                 messages
-                  .filter((message) => message.role === "user" || message.content.length > 0)
+                  .filter((message) => message.role === "user" || message.content.length > 0 || message.callEmbed)
                   .map((message) => (
                     <div
                       key={message.id}
@@ -2235,6 +2008,7 @@ function DashboardChatScreen({ user, sites }: { user: User; sites: Site[] }) {
                           />
                         ) : (
                           <div className="dashboard-chat__message-content">
+                            {message.callEmbed ? <DashboardChatCallEmbedCard call={message.callEmbed} /> : null}
                             <DashboardChatMessageText message={message} />
                           </div>
                         )}
@@ -2260,7 +2034,7 @@ function DashboardChatScreen({ user, sites }: { user: User; sites: Site[] }) {
           <div className="dashboard-chat__composer-shell">
             <form className="dashboard-chat__composer" onSubmit={handleSubmit}>
               <label className="dashboard-chat__sr-only" htmlFor="dashboardChatPrompt">
-                Message Barkan
+                Message Aidentity
               </label>
               <div className="dashboard-chat__composer-body">
                 <textarea
@@ -2268,7 +2042,7 @@ function DashboardChatScreen({ user, sites }: { user: User; sites: Site[] }) {
                   id="dashboardChatPrompt"
                   className="dashboard-chat__composer-input"
                   name="message"
-                  placeholder="Ask Barkan anything"
+                  placeholder="Ask your agent (openclaw) anything"
                   rows={1}
                   value={composerValue}
                   onChange={(event) => {
@@ -2301,7 +2075,7 @@ function DashboardChatScreen({ user, sites }: { user: User; sites: Site[] }) {
             <div className="dashboard-chat__composer-meta" aria-hidden="true">
               <div className="dashboard-chat__composer-meta-group">
                 <DashboardChatFolderIcon />
-                <span className="dashboard-chat__composer-meta-text">Barkan dashboard</span>
+                <span className="dashboard-chat__composer-meta-text">Aidentity dashboard</span>
                 <DashboardChatChevronIcon />
               </div>
               <div className="dashboard-chat__composer-meta-group dashboard-chat__composer-meta-group--sites">
@@ -2360,6 +2134,80 @@ function DashboardChatActivityMessage({
         </div>
       ) : null}
     </>
+  );
+}
+
+function DashboardChatCallEmbedCard({ call }: { call: DashboardChatMessage["callEmbed"] }) {
+  if (!call) {
+    return null;
+  }
+
+  const transcript = call.transcript ?? [];
+  const hasTranscript = transcript.length > 0;
+  const isCompleted = call.state === "completed";
+
+  return (
+    <section className={`dashboard-chat__call-card dashboard-chat__call-card--${call.state}`} aria-label="Phone call">
+      <div className="dashboard-chat__call-card-header">
+        <div className="dashboard-chat__call-card-title">
+          <span className="dashboard-chat__call-card-icon" aria-hidden="true">
+            <Phone size={16} />
+          </span>
+          <div>
+            <p>{isCompleted ? "Call completed" : "Call in progress"}</p>
+            <span>{call.recipientName || call.toNumber}</span>
+          </div>
+        </div>
+        <div className="dashboard-chat__call-card-status" aria-label={isCompleted ? "Completed" : "In progress"}>
+          <span />
+          {isCompleted ? formatCallDuration(call.durationSecs) : "Live"}
+        </div>
+      </div>
+
+      <div className="dashboard-chat__call-card-body">
+        <p className="dashboard-chat__call-card-task">{call.task}</p>
+        <div className="dashboard-chat__call-card-meta">
+          <span>{call.toNumber}</span>
+          <span>{call.simulated ? "Mock voice provider" : "Voice provider"}</span>
+        </div>
+      </div>
+
+      {isCompleted ? (
+        <div className="dashboard-chat__call-transcript" aria-label="Call transcript">
+          <div className="dashboard-chat__call-transcript-heading">
+            <span>Transcript</span>
+            <span>{call.status}</span>
+          </div>
+          {hasTranscript ? (
+            transcript.map((turn, turnIndex) => (
+              <div className="dashboard-chat__call-transcript-turn" key={`${turn.role}-${turnIndex}`}>
+                <span className="dashboard-chat__call-transcript-speaker">{formatTranscriptRole(turn.role)}</span>
+                <p>
+                  {splitTranscriptWords(turn.message).map((word, wordIndex) => (
+                    <span
+                      className="dashboard-chat__call-transcript-word"
+                      key={`${word}-${wordIndex}`}
+                      style={{ "--word-index": wordIndex + turnIndex * 8 } as CSSProperties}
+                    >
+                      {word}
+                    </span>
+                  ))}
+                </p>
+              </div>
+            ))
+          ) : (
+            <p className="dashboard-chat__call-transcript-empty">The call ended before transcript text was returned.</p>
+          )}
+        </div>
+      ) : (
+        <div className="dashboard-chat__call-progress" aria-hidden="true">
+          <span />
+          <span />
+          <span />
+          <span />
+        </div>
+      )}
+    </section>
   );
 }
 
@@ -2439,6 +2287,32 @@ function normalizeDashboardChatMarkdown(value: string): string {
   }
 
   return normalizedLines.join("\n");
+}
+
+function formatCallDuration(durationSecs: number | null | undefined): string {
+  if (typeof durationSecs !== "number" || !Number.isFinite(durationSecs) || durationSecs <= 0) {
+    return "Done";
+  }
+
+  const minutes = Math.floor(durationSecs / 60);
+  const seconds = Math.floor(durationSecs % 60);
+  return minutes > 0 ? `${minutes}m ${seconds.toString().padStart(2, "0")}s` : `${seconds}s`;
+}
+
+function formatTranscriptRole(role: string): string {
+  const normalizedRole = role.trim().toLowerCase();
+  if (normalizedRole === "agent" || normalizedRole === "assistant") {
+    return "Agent";
+  }
+  if (normalizedRole === "user") {
+    return "Recipient";
+  }
+
+  return role.trim() || "Speaker";
+}
+
+function splitTranscriptWords(value: string): string[] {
+  return value.split(/(\s+)/).filter(Boolean);
 }
 
 function isMarkdownTableHeaderLine(value: string): boolean {
@@ -2646,7 +2520,7 @@ function UserSettingsPage({
   const [avatarUrl, setAvatarUrl] = useState(user.avatarUrl ?? "");
   const [avatarInputKey, setAvatarInputKey] = useState(0);
   const [productEmails, setProductEmails] = useState(user.notificationPreferences.productEmails);
-  const [documentationEmails, setDocumentationEmails] = useState(user.notificationPreferences.documentationEmails);
+  const [identityEmails, setIdentityEmails] = useState(user.notificationPreferences.identityEmails);
   const [securityEmails, setSecurityEmails] = useState(user.notificationPreferences.securityEmails);
   const [isSavingProfile, setIsSavingProfile] = useState(false);
   const [profileError, setProfileError] = useState("");
@@ -2671,7 +2545,7 @@ function UserSettingsPage({
     normalizedAvatarUrl !== currentAvatarUrl;
   const hasNotificationChanges =
     productEmails !== user.notificationPreferences.productEmails ||
-    documentationEmails !== user.notificationPreferences.documentationEmails ||
+    identityEmails !== user.notificationPreferences.identityEmails ||
     securityEmails !== user.notificationPreferences.securityEmails;
 
   useEffect(() => {
@@ -2679,7 +2553,7 @@ function UserSettingsPage({
     setEmail(user.email);
     setAvatarUrl(user.avatarUrl ?? "");
     setProductEmails(user.notificationPreferences.productEmails);
-    setDocumentationEmails(user.notificationPreferences.documentationEmails);
+    setIdentityEmails(user.notificationPreferences.identityEmails);
     setSecurityEmails(user.notificationPreferences.securityEmails);
   }, [user]);
 
@@ -2754,7 +2628,7 @@ function UserSettingsPage({
     try {
       const response = await api.updateNotificationPreferences({
         productEmails,
-        documentationEmails,
+        identityEmails,
         securityEmails
       });
       onUserUpdated(response.user);
@@ -2933,7 +2807,7 @@ function UserSettingsPage({
                 <div className="site-detail-page__section-heading">
                   <div>
                     <h3>Account details</h3>
-                    <p>Basic information used across the Barkan dashboard.</p>
+                    <p>Basic information used across the Aidentity dashboard.</p>
                   </div>
                 </div>
                 <div className="user-settings-page__info-grid">
@@ -3005,15 +2879,15 @@ function UserSettingsPage({
                 <div className="user-settings-page__toggle-list">
                   <UserSettingsToggle
                     label="Product updates"
-                    description="New dashboard capabilities, widget improvements, and release notes."
+                    description="New dashboard capabilities, identity improvements, and release notes."
                     checked={productEmails}
                     onChange={setProductEmails}
                   />
                   <UserSettingsToggle
-                    label="Documentation status"
-                    description="Atlas connection, route documentation, and regeneration updates."
-                    checked={documentationEmails}
-                    onChange={setDocumentationEmails}
+                    label="Identity status"
+                    description="OpenClaw links, identity setup, and tool provisioning updates."
+                    checked={identityEmails}
+                    onChange={setIdentityEmails}
                   />
                   <UserSettingsToggle
                     label="Security alerts"
@@ -3239,9 +3113,7 @@ function SiteSettingsCategoryIcon({
 }: {
   icon:
     | "general"
-    | "installation"
-    | "documentation"
-    | "theme"
+    | "openclaw"
     | "phone"
     | "act-on-behalf"
     | "email"
@@ -3290,7 +3162,7 @@ function SiteSettingsCategoryIcon({
     );
   }
 
-  if (icon === "installation") {
+  if (icon === "openclaw") {
     return (
       <svg className="site-detail-page__category-icon" viewBox="0 0 24 24" aria-hidden="true">
         <path
@@ -3298,23 +3170,6 @@ function SiteSettingsCategoryIcon({
           d="M10.5 3A1.501 1.501 0 0 0 9 4.5h6A1.5 1.5 0 0 0 13.5 3h-3Zm-2.693.178A3 3 0 0 1 10.5 1.5h3a3 3 0 0 1 2.694 1.678c.497.042.992.092 1.486.15 1.497.173 2.57 1.46 2.57 2.929V19.5a3 3 0 0 1-3 3H6.75a3 3 0 0 1-3-3V6.257c0-1.47 1.073-2.756 2.57-2.93.493-.057.989-.107 1.487-.15Z"
           clipRule="evenodd"
         />
-      </svg>
-    );
-  }
-
-  if (icon === "documentation") {
-    return (
-      <svg className="site-detail-page__category-icon" viewBox="0 0 24 24" aria-hidden="true">
-        <path d="M5.625 1.5c-1.036 0-1.875.84-1.875 1.875v17.25c0 1.035.84 1.875 1.875 1.875h12.75c1.035 0 1.875-.84 1.875-1.875V12.75A3.75 3.75 0 0 0 16.5 9h-1.875a1.875 1.875 0 0 1-1.875-1.875V5.25A3.75 3.75 0 0 0 9 1.5H5.625Z" />
-        <path d="M12.971 1.816A5.23 5.23 0 0 1 14.25 5.25v1.875c0 .207.168.375.375.375H16.5a5.23 5.23 0 0 1 3.434 1.279 9.768 9.768 0 0 0-6.963-6.963Z" />
-      </svg>
-    );
-  }
-
-  if (icon === "theme") {
-    return (
-      <svg className="site-detail-page__category-icon" viewBox="0 0 20 20" aria-hidden="true">
-        <path d="M10 1.75a8.25 8.25 0 1 0 0 16.5V1.75Zm0 1.9v12.7a6.35 6.35 0 0 1 0-12.7Zm1.5.2v12.3a6.35 6.35 0 0 0 0-12.3Z" />
       </svg>
     );
   }
@@ -3374,17 +3229,9 @@ function BackChevronIcon({ className = "" }: { className?: string }) {
 function SiteDetailOverlay({
   site,
   activeTab,
-  snippet,
   apiKeys,
-  documentation,
-  backendDocumentation,
-  documentationAgent,
-  documentationGeneration,
-  backgroundDocumentationGeneration,
   onApiKeyCreated,
   onApiKeyDeleted,
-  onDocumentationGenerated,
-  onDocumentationAgentLoaded,
   onSiteDetailLoaded,
   onSiteUpdated,
   onSiteDeleted,
@@ -3394,33 +3241,21 @@ function SiteDetailOverlay({
 }: {
   site: Site;
   activeTab: SiteDetailTab;
-  snippet: string;
   apiKeys: SiteApiKey[];
-  documentation: SiteDocumentation;
-  backendDocumentation: SiteBackendDocumentation;
-  documentationAgent: DocumentationAgentStatus | null;
-  documentationGeneration: DocumentationGenerationStatus | null;
-  backgroundDocumentationGeneration: BackgroundDocumentationGeneration | null;
   onApiKeyCreated: (apiKey: SiteApiKey) => void;
   onApiKeyDeleted: (apiKeyId: string) => void;
-  onDocumentationGenerated: (result: DocumentationGenerationResult) => void;
-  onDocumentationAgentLoaded: (agent: DocumentationAgentStatus | null) => void;
   onSiteDetailLoaded: (detail: SiteDetailResponse) => void;
-  onSiteUpdated: (site: Site, snippet?: string) => void;
+  onSiteUpdated: (site: Site) => void;
   onSiteDeleted: (siteId: string) => void;
   onNotify: (notification: ToastNotificationInput) => void;
   onTabChange: (tab: SiteDetailTab) => void;
   onClose: () => void;
 }) {
-  const [activeDocumentationView, setActiveDocumentationView] = useState<DocumentationView>("frontend");
   const [draftName, setDraftName] = useState(site.name);
   const [draftDomain, setDraftDomain] = useState(site.domain);
   const [draftDescription, setDraftDescription] = useState("");
-  const [draftChatTheme, setDraftChatTheme] = useState<ChatTheme>(site.chatTheme ?? "system");
   const [isSavingSite, setIsSavingSite] = useState(false);
-  const [isSavingTheme, setIsSavingTheme] = useState(false);
   const [siteSaveError, setSiteSaveError] = useState("");
-  const [themeSaveError, setThemeSaveError] = useState("");
   const [createdApiKeySecret, setCreatedApiKeySecret] = useState<{
     apiKeyId: string;
     secret: string;
@@ -3431,24 +3266,11 @@ function SiteDetailOverlay({
   const [copiedApiKeyId, setCopiedApiKeyId] = useState<string | null>(null);
   const [isDeletingSite, setIsDeletingSite] = useState(false);
   const [siteDeleteError, setSiteDeleteError] = useState("");
-  const [documentationSearch, setDocumentationSearch] = useState("");
-  const [generationError, setGenerationError] = useState("");
-  const [isStartingDocumentationGeneration, setIsStartingDocumentationGeneration] = useState(false);
-  const [isGeneratingDocumentation, setIsGeneratingDocumentation] = useState(false);
-  const [activeGenerationStep, setActiveGenerationStep] = useState<DocumentationProgressStep | null>(null);
-  const [completedGenerationSteps, setCompletedGenerationSteps] = useState<Set<DocumentationProgressStep>>(
-    () => new Set()
-  );
-  const [generationStepProgress, setGenerationStepProgress] = useState<
-    Partial<Record<DocumentationProgressStep, { current: number; total: number; label?: string }>>
-  >({});
   useEffect(() => {
     setDraftName(site.name);
     setDraftDomain(site.domain);
-    setDraftChatTheme(site.chatTheme ?? "system");
     setSiteSaveError("");
-    setThemeSaveError("");
-  }, [site.id, site.name, site.domain, site.chatTheme]);
+  }, [site.id, site.name, site.domain]);
 
   useEffect(() => {
     setDraftDescription("");
@@ -3491,7 +3313,7 @@ function SiteDetailOverlay({
         api.updateSite(site.id, updates),
         sleep(500)
       ]);
-      onSiteUpdated(response.site, response.snippet);
+      onSiteUpdated(response.site);
       onNotify({
         title: "Identity settings saved"
       });
@@ -3499,31 +3321,6 @@ function SiteDetailOverlay({
       setSiteSaveError(getErrorMessage(saveError, "Could not save identity settings"));
     } finally {
       setIsSavingSite(false);
-    }
-  }
-
-  async function saveThemeSettings() {
-    if (draftChatTheme === (site.chatTheme ?? "system")) {
-      setThemeSaveError("");
-      return;
-    }
-
-    setIsSavingTheme(true);
-    setThemeSaveError("");
-
-    try {
-      const [response] = await Promise.all([
-        api.updateSite(site.id, { chatTheme: draftChatTheme }),
-        sleep(500)
-      ]);
-      onSiteUpdated(response.site, response.snippet);
-      onNotify({
-        title: "Policy settings saved"
-      });
-    } catch (saveError) {
-      setThemeSaveError(getErrorMessage(saveError, "Could not save policy settings"));
-    } finally {
-      setIsSavingTheme(false);
     }
   }
 
@@ -3598,143 +3395,10 @@ function SiteDetailOverlay({
     }
   }
 
-  const filteredDocumentationRoutes = useMemo(() => {
-    if (!documentation) {
-      return [];
-    }
-
-    const query = documentationSearch.trim().toLowerCase();
-    if (!query) {
-      return documentation.routes;
-    }
-
-    return documentation.routes.filter((route) =>
-      `${route.path} ${route.summary}`.toLowerCase().includes(query)
-    );
-  }, [documentation, documentationSearch]);
-
-  const filteredBackendEndpoints = useMemo(() => {
-    if (!backendDocumentation) {
-      return [];
-    }
-
-    const query = documentationSearch.trim().toLowerCase();
-    if (!query) {
-      return backendDocumentation.endpoints;
-    }
-
-    return backendDocumentation.endpoints.filter((endpoint) =>
-      [
-        endpoint.method,
-        endpoint.path,
-        endpoint.summary,
-        endpoint.auth,
-        endpoint.response.success,
-        ...endpoint.response.errors
-      ].join(" ").toLowerCase().includes(query)
-    );
-  }, [backendDocumentation, documentationSearch]);
-  const activeDocumentationGeneration = backgroundDocumentationGeneration?.status === "running"
-    ? backgroundDocumentationGeneration
-    : documentationGeneration?.status === "running"
-      ? {
-          activeStep: documentationGeneration.activeStep,
-          completedSteps: new Set(documentationGeneration.completedSteps),
-          stepProgress: documentationGeneration.stepProgress
-        }
-      : null;
-
-  async function generateDocumentation() {
-    await runDocumentationGeneration();
-  }
-
-  async function runDocumentationGeneration() {
-    setGenerationError("");
-    setIsStartingDocumentationGeneration(true);
-    setIsGeneratingDocumentation(false);
-    setActiveGenerationStep("connection");
-    setCompletedGenerationSteps(new Set());
-    setGenerationStepProgress({
-      connection: { current: 0, total: 1, label: "Checking connection" }
-    });
-
-    try {
-      const agentResponse = await api.getSiteDocumentationAgent(site.id);
-      onDocumentationAgentLoaded(agentResponse.documentationAgent);
-      if (!agentResponse.documentationAgent?.connected) {
-        setGenerationError("Run npx barkan connect from the client codebase before regenerating documentation.");
-        return;
-      }
-
-      setCompletedGenerationSteps(new Set(["connection"]));
-      setGenerationStepProgress({
-        connection: { current: 1, total: 1, label: "Connected" }
-      });
-      const generatedDocumentation = await api.generateSiteDocumentation(site.id, handleDocumentationGenerationEvent);
-      onDocumentationGenerated(generatedDocumentation);
-      setDocumentationSearch("");
-      onNotify({
-        title: "Documentation generated"
-      });
-    } catch (generateError) {
-      const errorMessage = getErrorMessage(generateError, "Could not generate documentation");
-      if (errorMessage.includes("Documentation generation is already running")) {
-        try {
-          onSiteDetailLoaded(await api.getSite(site.id));
-          return;
-        } catch {
-          // Keep the original generation error visible if the follow-up state refresh fails.
-        }
-      }
-      setGenerationError(errorMessage);
-    } finally {
-      setIsStartingDocumentationGeneration(false);
-      setIsGeneratingDocumentation(false);
-      setActiveGenerationStep(null);
-    }
-  }
-
-  function handleDocumentationGenerationEvent(event: DocumentationGenerationEvent) {
-    if (event.type === "step_started") {
-      setIsStartingDocumentationGeneration(false);
-      setIsGeneratingDocumentation(true);
-      setActiveGenerationStep(event.step);
-      if (typeof event.total === "number") {
-        setGenerationStepProgress((currentProgress) => ({
-          ...currentProgress,
-          [event.step]: { current: 0, total: event.total }
-        }));
-      }
-      return;
-    }
-
-    if (event.type === "step_progress") {
-      setIsStartingDocumentationGeneration(false);
-      setIsGeneratingDocumentation(true);
-      setActiveGenerationStep(event.step);
-      setGenerationStepProgress((currentProgress) => ({
-        ...currentProgress,
-        [event.step]: { current: event.current, total: event.total, label: event.label }
-      }));
-      return;
-    }
-
-    if (event.type === "step_completed") {
-      setCompletedGenerationSteps((currentSteps) => new Set([...currentSteps, event.step]));
-      if (typeof event.current === "number" && typeof event.total === "number") {
-        setGenerationStepProgress((currentProgress) => ({
-          ...currentProgress,
-          [event.step]: { current: event.current, total: event.total }
-        }));
-      }
-    }
-  }
-
   const normalizedDraftName = draftName.trim();
   const normalizedDraftDomain = draftDomain.trim();
   const hasSiteDraftChanges = normalizedDraftName !== site.name || normalizedDraftDomain !== site.domain;
   const isSaveDisabled = isSavingSite || !normalizedDraftName || !normalizedDraftDomain || !hasSiteDraftChanges;
-  const isThemeSaveDisabled = isSavingTheme || draftChatTheme === (site.chatTheme ?? "system");
   const previewDescription = draftDescription.trim() || "This OpenClaw agent can call, email, pay, schedule, and receive real-world events.";
 
   return (
@@ -3761,29 +3425,16 @@ function SiteDetailOverlay({
             </button>
             <button
               className="site-detail-page__tab"
-              id="site-detail-installation-tab"
+              id="site-detail-openclaw-tab"
               type="button"
               role="tab"
               aria-label="OpenClaw"
-              aria-selected={activeTab === "installation"}
-              aria-controls="site-detail-installation-panel"
-              onClick={() => onTabChange("installation")}
+              aria-selected={activeTab === "openclaw"}
+              aria-controls="site-detail-openclaw-panel"
+              onClick={() => onTabChange("openclaw")}
             >
-              <SiteSettingsCategoryIcon icon="installation" />
+              <SiteSettingsCategoryIcon icon="openclaw" />
               <span>OpenClaw</span>
-            </button>
-            <button
-              className="site-detail-page__tab"
-              id="site-detail-theme-tab"
-              type="button"
-              role="tab"
-              aria-label="Theme"
-              aria-selected={activeTab === "theme"}
-              aria-controls="site-detail-theme-panel"
-              onClick={() => onTabChange("theme")}
-            >
-              <SiteSettingsCategoryIcon icon="theme" />
-              <span>Policy</span>
             </button>
             <button
               className="site-detail-page__tab"
@@ -3823,19 +3474,6 @@ function SiteDetailOverlay({
             >
               <SiteSettingsCategoryIcon icon="email" />
               <span>Email</span>
-            </button>
-            <button
-              className="site-detail-page__tab"
-              id="site-detail-documentation-tab"
-              type="button"
-              role="tab"
-              aria-label="Documentation"
-              aria-selected={activeTab === "documentation"}
-              aria-controls="site-detail-documentation-panel"
-              onClick={() => onTabChange("documentation")}
-            >
-              <SiteSettingsCategoryIcon icon="documentation" />
-              <span>Documentation</span>
             </button>
           </nav>
         </aside>
@@ -3942,7 +3580,7 @@ function SiteDetailOverlay({
                 </button>
               </section>
             </>
-          ) : activeTab === "installation" ? (
+          ) : activeTab === "openclaw" ? (
             <>
               <header className="site-detail-page__header">
                 <div>
@@ -3950,7 +3588,7 @@ function SiteDetailOverlay({
                 </div>
               </header>
 
-              <section className="site-detail-panel__snippet site-detail-page__section">
+              <section className="site-detail-panel__receipt site-detail-page__section">
                 <div className="site-detail-page__section-heading">
                   <div>
                     <h3>Identity layer receipt</h3>
@@ -3973,7 +3611,7 @@ function SiteDetailOverlay({
                 <div className="site-detail-page__section-heading">
                   <div>
                     <h3>OpenClaw linking tokens</h3>
-                    <p>Create a scoped token for an OpenClaw instance to confirm the Barkan identity skill install.</p>
+                    <p>Create a scoped token for an OpenClaw instance to confirm the Aidentity identity skill install.</p>
                   </div>
                   <button
                     className="site-detail-page__section-action"
@@ -4032,134 +3670,6 @@ function SiteDetailOverlay({
                 {apiKeyError ? <p className="site-detail-panel__error">{apiKeyError}</p> : null}
               </section>
             </>
-          ) : activeTab === "theme" ? (
-            <>
-              <header className="site-detail-page__header">
-                <div>
-                  <h1 id="siteDetailTitle">Policy</h1>
-                </div>
-                <button
-                  className={`site-detail-page__save${isSavingTheme ? " site-detail-page__save--saving" : ""}`}
-                  type="button"
-                  onClick={() => void saveThemeSettings()}
-                  disabled={isThemeSaveDisabled}
-                  aria-label={isSavingTheme ? "Saving policy settings" : "Save policy settings"}
-                >
-                  {isSavingTheme ? <Loader2 size={15} strokeWidth={3.2} aria-hidden="true" /> : <span>Save</span>}
-                </button>
-              </header>
-
-              <section className="site-detail-page__section site-detail-page__theme-section">
-                <div className="site-detail-page__section-heading">
-                  <div>
-                    <h3>Agent interaction mode</h3>
-                    <p>Choose how strictly the identity layer should mediate agent actions.</p>
-                  </div>
-                </div>
-
-                <div className="site-detail-page__theme-options" role="radiogroup" aria-label="Agent policy">
-                  {([
-                    {
-                      value: "system",
-                      label: "Balanced",
-                      description: "Require confirmations for high-impact calls, payments, and scheduling.",
-                      previewClassName: "site-detail-page__theme-preview--system"
-                    },
-                    {
-                      value: "light",
-                      label: "Fast",
-                      description: "Allow low-risk actions to execute with fewer confirmation pauses.",
-                      previewClassName: "site-detail-page__theme-preview--light"
-                    },
-                    {
-                      value: "dark",
-                      label: "Strict",
-                      description: "Hold every external action until an approval rule allows it.",
-                      previewClassName: "site-detail-page__theme-preview--dark"
-                    }
-                  ] as Array<{ value: ChatTheme; label: string; description: string; previewClassName: string }>).map((option) => (
-                    <button
-                      className="site-detail-page__theme-option"
-                      type="button"
-                      role="radio"
-                      aria-checked={draftChatTheme === option.value}
-                      key={option.value}
-                      onClick={() => setDraftChatTheme(option.value)}
-                    >
-                      <span className={`site-detail-page__theme-preview ${option.previewClassName}`} aria-hidden="true">
-                        <span />
-                      </span>
-                      <span className="site-detail-page__theme-copy">
-                        <strong>{option.label}</strong>
-                        <small>{option.description}</small>
-                      </span>
-                      <span className="site-detail-page__theme-check" aria-hidden="true">
-                        <Check size={14} strokeWidth={3} />
-                      </span>
-                    </button>
-                  ))}
-                </div>
-                {themeSaveError ? <p className="site-detail-panel__error">{themeSaveError}</p> : null}
-              </section>
-            </>
-          ) : activeTab === "documentation" ? (
-            <>
-              <header className="site-detail-page__header">
-                <div>
-                  <h1 id="siteDetailTitle">Documentation</h1>
-                </div>
-              </header>
-
-              <div className="site-detail-panel__documentation site-detail-page__section site-detail-page__section--flush">
-                {activeDocumentationGeneration ? (
-                  <DocumentationGenerationStepper
-                    activeStep={activeDocumentationGeneration.activeStep}
-                    completedSteps={activeDocumentationGeneration.completedSteps}
-                    stepProgress={activeDocumentationGeneration.stepProgress}
-                    steps={onboardingDocumentationSteps}
-                  />
-                ) : isStartingDocumentationGeneration || isGeneratingDocumentation ? (
-                  <DocumentationGenerationStepper
-                    activeStep={activeGenerationStep}
-                    completedSteps={completedGenerationSteps}
-                    stepProgress={generationStepProgress}
-                    steps={onboardingDocumentationSteps}
-                  />
-                ) : documentation ? (
-                  <DocumentationRouteBrowser
-                    documentation={documentation}
-                    backendDocumentation={backendDocumentation}
-                    documentationAgent={documentationAgent}
-                    activeView={activeDocumentationView}
-                    onViewChange={setActiveDocumentationView}
-                    filteredRoutes={filteredDocumentationRoutes}
-                    filteredEndpoints={filteredBackendEndpoints}
-                    search={documentationSearch}
-                    isRegenerating={isStartingDocumentationGeneration || isGeneratingDocumentation}
-                    error={generationError}
-                    onSearchChange={setDocumentationSearch}
-                    onRegenerate={() => void generateDocumentation()}
-                  />
-                ) : documentationAgent?.connected ? (
-                  <DocumentationReadyState
-                    error={generationError}
-                    onGenerate={() => void generateDocumentation()}
-                  />
-                ) : apiKeys.length === 0 ? (
-                  <DocumentationEmptyState
-                    icon={<KeyRound size={24} aria-hidden="true" />}
-                    title="Create a CLI key"
-                    description="Create a site-scoped key in Credentials, then run npx barkan connect from the client codebase."
-                  />
-                ) : (
-                  <DocumentationEmptyState
-                    icon={<BookOpen size={24} aria-hidden="true" />}
-                    title="Connect to your codebase"
-                    description="Run npx barkan connect with this site key from the client codebase, then generate documentation here."
-                  />
-                )}
-              </div>
-            </>
           ) : null}
         </div>
       </div>
@@ -4167,32 +3677,32 @@ function SiteDetailOverlay({
   );
 }
 
-function DocumentationGenerationStepper({
+function SetupProgressStepper({
   activeStep,
   completedSteps,
   stepProgress,
-  steps = documentationGenerationSteps
+  steps = onboardingSetupSteps
 }: {
-  activeStep: DocumentationProgressStep | null;
-  completedSteps: Set<DocumentationProgressStep>;
-  stepProgress: Partial<Record<DocumentationProgressStep, { current: number; total: number; label?: string }>>;
-  steps?: Array<{ id: DocumentationProgressStep; label: string }>;
+  activeStep: SetupProgressStep | null;
+  completedSteps: Set<SetupProgressStep>;
+  stepProgress: SetupStepProgress;
+  steps?: Array<{ id: SetupProgressStep; label: string }>;
 }) {
   const currentStepIndex = activeStep
     ? steps.findIndex((step) => step.id === activeStep)
     : Math.max(0, completedSteps.size - 1);
-  const lineProgress = Math.min(completedSteps.size, steps.length - 1) / (steps.length - 1);
+  const lineProgress = steps.length <= 1 ? (completedSteps.size > 0 ? 1 : 0) : Math.min(completedSteps.size, steps.length - 1) / (steps.length - 1);
 
   return (
     <div
-      className="documentation-stepper"
+      className="setup-progress"
       style={
         {
-          "--documentation-step-count": steps.length,
-          "--documentation-step-progress": lineProgress
+          "--setup-progress-step-count": steps.length,
+          "--setup-progress-line-progress": lineProgress
         } as CSSProperties
       }
-      aria-label="Documentation generation progress"
+      aria-label="Setup progress"
     >
       {steps.map((step, index) => {
         const isCompleted = completedSteps.has(step.id);
@@ -4206,15 +3716,15 @@ function DocumentationGenerationStepper({
             : 0;
 
         return (
-          <div className={`documentation-stepper__step documentation-stepper__step--${state}`} key={step.id}>
+          <div className={`setup-progress__step setup-progress__step--${state}`} key={step.id}>
             <div
-              className="documentation-stepper__circle"
-              style={{ "--documentation-circle-progress": `${circleProgress}turn` } as CSSProperties}
+              className="setup-progress__circle"
+              style={{ "--setup-progress-circle-progress": `${circleProgress}turn` } as CSSProperties}
             >
               {isCompleted ? <Check size={15} aria-hidden="true" /> : <span>{index + 1}</span>}
             </div>
-            <span className="documentation-stepper__label">{step.label}</span>
-            {progress?.label ? <small className="documentation-stepper__detail">{progress.label}</small> : null}
+            <span className="setup-progress__label">{step.label}</span>
+            {progress?.label ? <small className="setup-progress__detail">{progress.label}</small> : null}
           </div>
         );
       })}
@@ -4222,273 +3732,12 @@ function DocumentationGenerationStepper({
   );
 }
 
-function DocumentationEmptyState({
-  icon,
-  title,
-  description
-}: {
-  icon: ReactNode;
-  title: string;
-  description: string;
-}) {
-  return (
-    <div className="documentation-empty-state">
-      {icon}
-      <h3>{title}</h3>
-      <p>{description}</p>
-    </div>
-  );
-}
-
-function DocumentationReadyState({
-  error,
-  onGenerate
-}: {
-  error: string;
-  onGenerate: () => void;
-}) {
-  return (
-    <div className="documentation-ready-state">
-      <div>
-        <h3>Ready to generate documentation</h3>
-        <p>Barkan detected the connected codebase.</p>
-      </div>
-      <button className="site-detail-page__section-action" type="button" onClick={onGenerate}>
-        Generate documentation
-      </button>
-      {error ? <p className="site-detail-panel__error">{error}</p> : null}
-    </div>
-  );
-}
-
-function DocumentationRouteBrowser({
-  documentation,
-  backendDocumentation,
-  documentationAgent,
-  activeView,
-  onViewChange,
-  filteredRoutes,
-  filteredEndpoints,
-  search,
-  isRegenerating,
-  error,
-  onSearchChange,
-  onRegenerate
-}: {
-  documentation: AtlasRouteMapDocument;
-  backendDocumentation: SiteBackendDocumentation;
-  documentationAgent: DocumentationAgentStatus | null;
-  activeView: DocumentationView;
-  onViewChange: (view: DocumentationView) => void;
-  filteredRoutes: AtlasRouteMapDocument["routes"];
-  filteredEndpoints: AtlasBackendInventoryDocument["endpoints"];
-  search: string;
-  isRegenerating: boolean;
-  error: string;
-  onSearchChange: (value: string) => void;
-  onRegenerate: () => void;
-}) {
-  const endpointCount = backendDocumentation?.endpoints.length ?? 0;
-  const sourceFileCount = new Set([
-    ...documentation.source_files,
-    ...(backendDocumentation?.source_files ?? [])
-  ]).size;
-
-  return (
-    <div className="documentation-browser">
-      <div className="documentation-browser__summary">
-        <div>
-          <h3>Documentation map</h3>
-          <p>{documentation.routes.length} frontend routes · {endpointCount} backend endpoints · {sourceFileCount} source files · {formatDocumentationTimestamp(documentation.generated_at)}</p>
-        </div>
-        <button
-          className="site-detail-page__section-action"
-          type="button"
-          onClick={onRegenerate}
-          disabled={isRegenerating}
-          title={documentationAgent?.connected ? "Regenerate documentation" : "Run npx barkan connect before regenerating"}
-        >
-          Regenerate doc
-        </button>
-      </div>
-
-      <div className="documentation-browser__switcher" role="group" aria-label="Documentation type">
-        <button
-          type="button"
-          className={activeView === "frontend" ? "documentation-browser__switch documentation-browser__switch--active" : "documentation-browser__switch"}
-          aria-pressed={activeView === "frontend"}
-          onClick={() => onViewChange("frontend")}
-        >
-          Frontend routes
-        </button>
-        <button
-          type="button"
-          className={activeView === "backend" ? "documentation-browser__switch documentation-browser__switch--active" : "documentation-browser__switch"}
-          aria-pressed={activeView === "backend"}
-          onClick={() => onViewChange("backend")}
-        >
-          Backend endpoints
-        </button>
-      </div>
-
-      {!documentationAgent?.connected ? (
-        <p className="documentation-browser__notice">
-          Run <code>npx barkan connect</code> from the client codebase before regenerating this documentation.
-        </p>
-      ) : null}
-      {error ? <p className="site-detail-panel__error">{error}</p> : null}
-
-      <label className="documentation-browser__search">
-        <Search size={17} aria-hidden="true" />
-        <span className="sr-only">Search documentation</span>
-        <input
-          type="search"
-          placeholder={activeView === "frontend" ? "Search routes..." : "Search endpoints..."}
-          value={search}
-          onChange={(event) => onSearchChange(event.target.value)}
-        />
-      </label>
-
-      {activeView === "frontend" ? (
-        <div className="documentation-browser__routes">
-          {filteredRoutes.length > 0 ? (
-            filteredRoutes.map((route) => (
-              <article className="documentation-browser__route" key={route.path}>
-                <code>{route.path}</code>
-                <p>{route.summary}</p>
-              </article>
-            ))
-          ) : (
-            <div className="documentation-empty-state documentation-empty-state--compact">
-              <Search size={22} aria-hidden="true" />
-              <h3>No routes found</h3>
-              <p>Try another path or summary keyword.</p>
-            </div>
-          )}
-        </div>
-      ) : (
-        <div className="documentation-browser__routes">
-          {!backendDocumentation ? (
-            <div className="documentation-empty-state documentation-empty-state--compact">
-              <FileText size={22} aria-hidden="true" />
-              <h3>No backend docs yet</h3>
-              <p>Regenerate documentation to create the backend endpoint inventory.</p>
-            </div>
-          ) : filteredEndpoints.length > 0 ? (
-            filteredEndpoints.map((endpoint) => (
-              <DocumentationBackendEndpointCard endpoint={endpoint} key={`${endpoint.method} ${endpoint.path}`} />
-            ))
-          ) : (
-            <div className="documentation-empty-state documentation-empty-state--compact">
-              <Search size={22} aria-hidden="true" />
-              <h3>No endpoints found</h3>
-              <p>Try another method, path, or summary keyword.</p>
-            </div>
-          )}
-        </div>
-      )}
-    </div>
-  );
-}
-
-function DocumentationBackendEndpointCard({
-  endpoint
-}: {
-  endpoint: AtlasBackendInventoryDocument["endpoints"][number];
-}) {
-  return (
-    <article className="documentation-browser__route documentation-browser__endpoint">
-      <div className="documentation-browser__endpoint-heading">
-        <span className={`documentation-browser__method documentation-browser__method--${endpoint.method.toLowerCase()}`}>
-          {endpoint.method}
-        </span>
-        <code>{endpoint.path}</code>
-      </div>
-      <p>{endpoint.summary}</p>
-      <dl className="documentation-browser__endpoint-meta">
-        <div>
-          <dt>Auth</dt>
-          <dd>{endpoint.auth}</dd>
-        </div>
-        <div>
-          <dt>Success</dt>
-          <dd>{endpoint.response.success}</dd>
-        </div>
-      </dl>
-      <DocumentationRequestFields request={endpoint.request} />
-      {endpoint.response.errors.length > 0 ? (
-        <div className="documentation-browser__endpoint-errors">
-          <span>Errors</span>
-          <ul>
-            {endpoint.response.errors.map((endpointError) => (
-              <li key={endpointError}>{endpointError}</li>
-            ))}
-          </ul>
-        </div>
-      ) : null}
-    </article>
-  );
-}
-
-function DocumentationRequestFields({
-  request
-}: {
-  request: AtlasBackendInventoryDocument["endpoints"][number]["request"];
-}) {
-  const sections = (["params", "query", "body"] as const)
-    .map((section) => ({
-      section,
-      fields: Object.entries(request[section] ?? {})
-    }))
-    .filter(({ fields }) => fields.length > 0);
-
-  if (sections.length === 0) {
-    return null;
-  }
-
-  return (
-    <div className="documentation-browser__request">
-      {sections.map(({ section, fields }) => (
-        <div className="documentation-browser__request-section" key={section}>
-          <span>{section}</span>
-          <DocumentationFieldList fields={fields} />
-        </div>
-      ))}
-    </div>
-  );
-}
-
-function DocumentationFieldList({
-  fields
-}: {
-  fields: Array<[string, { type: string; required: boolean; enum?: string[] }]>;
-}) {
-  return (
-    <div>
-      {fields.map(([fieldName, field]) => (
-        <code key={fieldName}>
-          {fieldName}: {field.type}{field.enum?.length ? ` enum [${field.enum.join(", ")}]` : ""}{field.required ? " required" : " optional"}
-        </code>
-      ))}
-    </div>
-  );
-}
 function SiteOnboardingScreen({
   onCancel,
-  onCreated,
-  onDocumentationGenerationStarted,
-  onDocumentationGenerationSiteLinked,
-  onDocumentationGenerationEvent,
-  onDocumentationGenerationCompleted,
-  onDocumentationGenerationFailed
+  onCreated
 }: {
   onCancel: () => void;
   onCreated: (detail: SiteDetailResponse) => Promise<void>;
-  onDocumentationGenerationStarted: (projectId: string) => void;
-  onDocumentationGenerationSiteLinked: (projectId: string, siteId: string) => void;
-  onDocumentationGenerationEvent: (projectId: string, event: DocumentationGenerationEvent) => void;
-  onDocumentationGenerationCompleted: (projectId: string, result: DocumentationGenerationResult) => void;
-  onDocumentationGenerationFailed: (projectId: string, error: string) => void;
 }) {
   const [step, setStep] = useState<SiteOnboardingStep>("name");
   const [displayStep, setDisplayStep] = useState<SiteOnboardingStep>("name");
@@ -4510,13 +3759,10 @@ function SiteOnboardingScreen({
   const [isPreparingSetup, setIsPreparingSetup] = useState(false);
   const [isSkippingSetup, setIsSkippingSetup] = useState(false);
   const [isWaitingForAgent, setIsWaitingForAgent] = useState(false);
-  const [isGeneratingDocumentation, setIsGeneratingDocumentation] = useState(false);
-  const [activeSetupStep, setActiveSetupStep] = useState<DocumentationProgressStep | null>(null);
-  const [completedSetupSteps, setCompletedSetupSteps] = useState<Set<DocumentationProgressStep>>(() => new Set());
-  const [setupStepProgress, setSetupStepProgress] = useState<
-    Partial<Record<DocumentationProgressStep, { current: number; total: number; label?: string }>>
-  >({});
-  const [isSnippetCopied, setIsSnippetCopied] = useState(false);
+  const [activeSetupStep, setActiveSetupStep] = useState<SetupProgressStep | null>(null);
+  const [completedSetupSteps, setCompletedSetupSteps] = useState<Set<SetupProgressStep>>(() => new Set());
+  const [setupStepProgress, setSetupStepProgress] = useState<SetupStepProgress>({});
+  const [isReceiptCopied, setIsReceiptCopied] = useState(false);
   const currentStepRef = useRef<SiteOnboardingStep>("name");
   const displayStepRef = useRef<SiteOnboardingStep>("name");
   const nameInputRef = useRef<HTMLInputElement>(null);
@@ -4528,7 +3774,6 @@ function SiteOnboardingScreen({
   const transitionSwapTimeoutRef = useRef<number | null>(null);
   const transitionFinishTimeoutRef = useRef<number | null>(null);
   const apiKeyCopiedTimeoutRef = useRef<number | null>(null);
-  const shouldSkipDocumentationSetupRef = useRef(false);
   const isMountedRef = useRef(true);
 
   useEffect(() => {
@@ -4646,7 +3891,7 @@ function SiteOnboardingScreen({
 
     const normalizedEndpoint = openClawMode === "existing"
       ? domain.trim()
-      : `${slugifyIdentityName(name)}.managed-openclaw.barkan.dev`;
+      : `${slugifyIdentityName(name)}.managed-openclaw.aidentity.dev`;
 
     setDomain(normalizedEndpoint);
     setSubmittingStep("openclaw");
@@ -4654,8 +3899,6 @@ function SiteOnboardingScreen({
     setError("");
     setDomainError("");
     setSetupError("");
-    shouldSkipDocumentationSetupRef.current = false;
-
     let preparedProjectId = setupProjectId;
     try {
       const setupResponse = preparedProjectId ? null : await api.createSiteSetup(name.trim(), normalizedEndpoint);
@@ -4701,7 +3944,6 @@ function SiteOnboardingScreen({
 
   function showOpenClawWaitingState() {
     setIsWaitingForAgent(true);
-    setIsGeneratingDocumentation(false);
     setActiveSetupStep("connection");
     setCompletedSetupSteps(new Set());
     setSetupStepProgress({
@@ -4738,15 +3980,13 @@ function SiteOnboardingScreen({
     setSetupError("");
 
     try {
-      const finalDetail = await api.completeSiteSetup(projectId, { skipDocumentation: true });
+      const finalDetail = await api.completeSiteSetup(projectId);
       if (!isMountedRef.current) {
         return;
       }
 
-      onDocumentationGenerationSiteLinked(projectId, finalDetail.site.id);
       setCreatedSiteDetail(finalDetail);
       setIsWaitingForAgent(false);
-      setIsGeneratingDocumentation(false);
       setIsSkippingSetup(false);
       setActiveSetupStep(null);
       transitionToStep("install");
@@ -4757,12 +3997,11 @@ function SiteOnboardingScreen({
     }
   }
 
-  async function retryDocumentationSetup() {
-    if (!setupProjectId || isWaitingForAgent || isGeneratingDocumentation) {
+  async function retryOpenClawSetup() {
+    if (!setupProjectId || isWaitingForAgent) {
       return;
     }
 
-    shouldSkipDocumentationSetupRef.current = false;
     setSetupError("");
     if (openClawMode === "deploy") {
       await completeManagedOpenClawSetup(setupProjectId);
@@ -4772,140 +4011,12 @@ function SiteOnboardingScreen({
     showOpenClawWaitingState();
   }
 
-  async function continueDocumentationSetup(projectId: string) {
-    if (shouldSkipDocumentationSetupRef.current) {
-      return;
-    }
-
-    setSetupError("");
-    setIsWaitingForAgent(true);
-    setIsGeneratingDocumentation(false);
-    setActiveSetupStep("connection");
-    setCompletedSetupSteps(new Set());
-    setSetupStepProgress({
-      connection: { current: 0, total: 1, label: "Waiting for npx barkan connect" }
-    });
-
-    try {
-      const setupState = await waitForDocumentationAgent(projectId);
-      if (!setupState || !isMountedRef.current || shouldSkipDocumentationSetupRef.current) {
-        return;
-      }
-
-      setIsWaitingForAgent(false);
-      setCompletedSetupSteps(new Set(["connection"]));
-      setSetupStepProgress((currentProgress) => ({
-        ...currentProgress,
-        connection: { current: 1, total: 1, label: "Connected" }
-      }));
-
-      setIsGeneratingDocumentation(true);
-      onDocumentationGenerationStarted(projectId);
-      const generatedDocumentation = await api.generateSiteSetupDocumentation(projectId, (event) =>
-        handleSetupDocumentationEvent(projectId, event)
-      );
-      onDocumentationGenerationCompleted(projectId, generatedDocumentation);
-      if (!isMountedRef.current || shouldSkipDocumentationSetupRef.current) {
-        return;
-      }
-
-      const finalDetail = await api.completeSiteSetup(projectId);
-      if (!isMountedRef.current || shouldSkipDocumentationSetupRef.current) {
-        return;
-      }
-
-      onDocumentationGenerationSiteLinked(projectId, finalDetail.site.id);
-      setCreatedSiteDetail(finalDetail);
-      setCompletedSetupSteps(new Set(onboardingDocumentationSteps.map((setupStep) => setupStep.id)));
-      setIsGeneratingDocumentation(false);
-      setActiveSetupStep(null);
-      transitionToStep("install");
-    } catch (documentationError) {
-      const errorMessage = getErrorMessage(documentationError, "Could not generate documentation");
-      onDocumentationGenerationFailed(projectId, errorMessage);
-      if (!isMountedRef.current) {
-        return;
-      }
-
-      if (shouldSkipDocumentationSetupRef.current) {
-        return;
-      }
-
-      setIsWaitingForAgent(false);
-      setIsGeneratingDocumentation(false);
-      setSetupError(errorMessage);
-    }
-  }
-
-  async function waitForDocumentationAgent(projectId: string) {
-    while (isMountedRef.current && !shouldSkipDocumentationSetupRef.current) {
-      const setupState = await api.getSiteSetup(projectId);
-      if (!isMountedRef.current) {
-        return setupState;
-      }
-
-      if (shouldSkipDocumentationSetupRef.current) {
-        return null;
-      }
-
-      if (setupState.documentationAgent?.connected) {
-        return setupState;
-      }
-
-      await sleep(2500);
-    }
-
-    if (shouldSkipDocumentationSetupRef.current) {
-      return null;
-    }
-
-    throw new Error("Setup was cancelled");
-  }
-
-  async function skipDocumentationSetup() {
+  async function completeExistingOpenClawSetup() {
     if (!setupProjectId || isSkippingSetup) {
       return;
     }
 
-    shouldSkipDocumentationSetupRef.current = true;
     await completeIdentitySetup(setupProjectId);
-  }
-
-  function handleSetupDocumentationEvent(projectId: string, event: DocumentationGenerationEvent) {
-    onDocumentationGenerationEvent(projectId, event);
-    if (shouldSkipDocumentationSetupRef.current) {
-      return;
-    }
-
-    if (event.type === "step_started") {
-      setActiveSetupStep(event.step);
-      if (typeof event.total === "number") {
-        setSetupStepProgress((currentProgress) => ({
-          ...currentProgress,
-          [event.step]: { current: 0, total: event.total }
-        }));
-      }
-      return;
-    }
-
-    if (event.type === "step_progress") {
-      setActiveSetupStep(event.step);
-      setSetupStepProgress((currentProgress) => ({
-        ...currentProgress,
-        [event.step]: { current: event.current, total: event.total, label: event.label }
-      }));
-      return;
-    }
-
-    if (event.type === "step_completed") {
-      setCompletedSetupSteps((currentSteps) => new Set([...currentSteps, event.step]));
-      if (typeof event.current === "number" && typeof event.total === "number") {
-        setSetupStepProgress((currentProgress) => ({
-          ...currentProgress,
-          [event.step]: { current: event.current, total: event.total }
-        }));
-      }
-    }
   }
 
   async function copyConnectCommand() {
@@ -4930,14 +4041,14 @@ function SiteOnboardingScreen({
     window.setTimeout(() => setIsPromptCopied(false), 1400);
   }
 
-  async function copyOnboardingSnippet() {
+  async function copyOnboardingReceipt() {
     if (!createdSiteDetail) {
       return;
     }
 
     await navigator.clipboard.writeText(buildIdentityReceipt(createdSiteDetail.site));
-    setIsSnippetCopied(true);
-    window.setTimeout(() => setIsSnippetCopied(false), 1400);
+    setIsReceiptCopied(true);
+    window.setTimeout(() => setIsReceiptCopied(false), 1400);
   }
 
   async function finishOnboarding() {
@@ -4962,8 +4073,8 @@ function SiteOnboardingScreen({
   const openClawPrompt = buildOpenClawLinkPrompt(name, createdApiKeySecret?.secret, setupProjectId);
   const setupTitle = openClawMode === "deploy" ? "Deploying OpenClaw" : "Link existing OpenClaw";
   const setupDescription = openClawMode === "deploy"
-    ? "We are deploying a managed OpenClaw instance and installing the Barkan identity layer."
-    : "Send this prompt to your OpenClaw instance. It installs the Barkan identity skill and confirms the link with a token.";
+    ? "We are deploying a managed OpenClaw instance and installing the Aidentity identity layer."
+    : "Send this prompt to your OpenClaw instance. It installs the Aidentity identity skill and confirms the link with a token.";
   const readyReceipt = buildIdentityReceipt(createdSiteDetail?.site ?? null);
 
   return (
@@ -5025,7 +4136,7 @@ function SiteOnboardingScreen({
                   <>
                     <OnboardingHeader
                       title="Connect OpenClaw"
-                      description="Use an existing OpenClaw instance, or let Barkan deploy one with the identity layer already installed."
+                      description="Use an existing OpenClaw instance, or let Aidentity deploy one with the identity layer already installed."
                     />
                     <form className="site-onboarding-page__form" onSubmit={startSetup} noValidate>
                       <div className="site-onboarding-page__sequence-item site-onboarding-page__mode-grid" style={getStaggerStyle(2)}>
@@ -5071,7 +4182,7 @@ function SiteOnboardingScreen({
                         ) : (
                           <div className="site-onboarding-page__managed-note">
                             <Server size={16} aria-hidden="true" />
-                            <span>{`${slugifyIdentityName(name)}.managed-openclaw.barkan.dev`}</span>
+                            <span>{`${slugifyIdentityName(name)}.managed-openclaw.aidentity.dev`}</span>
                           </div>
                         )}
                       </div>
@@ -5121,11 +4232,11 @@ function SiteOnboardingScreen({
                       ) : null}
 
                       <div className="site-onboarding-page__sequence-item" style={getStaggerStyle(openClawMode === "existing" ? 4 : 3)}>
-                        <DocumentationGenerationStepper
+                        <SetupProgressStepper
                           activeStep={activeSetupStep}
                           completedSteps={completedSetupSteps}
                           stepProgress={setupStepProgress}
-                          steps={onboardingDocumentationSteps}
+                          steps={onboardingSetupSteps}
                         />
                       </div>
 
@@ -5139,7 +4250,7 @@ function SiteOnboardingScreen({
                           className="site-onboarding-page__sequence-item site-onboarding-page__inline-action site-onboarding-page__inline-action--wide"
                           style={getStaggerStyle(5)}
                           type="button"
-                          onClick={() => void retryDocumentationSetup()}
+                          onClick={() => void retryOpenClawSetup()}
                         >
                           <FileText size={16} aria-hidden="true" />
                           <span>{setupRetryLabel}</span>
@@ -5156,12 +4267,12 @@ function SiteOnboardingScreen({
                               : "site-onboarding-page__submit site-onboarding-page__submit--secondary"
                           }
                           type="button"
-                          onClick={() => void skipDocumentationSetup()}
+                          onClick={() => void completeExistingOpenClawSetup()}
                           disabled={!setupProjectId || isSkippingSetup}
                           aria-busy={isSkippingSetup}
                         >
                           {isSkippingSetup ? (
-                            <span className="barkan-button-loader" aria-hidden="true" />
+                            <span className="aidentity-button-loader" aria-hidden="true" />
                           ) : (
                             <span>{openClawMode === "existing" ? "Demo: mark linked" : "Continue"}</span>
                           )}
@@ -5180,16 +4291,16 @@ function SiteOnboardingScreen({
                       description="This agent identity now has a phone number, inbox, payment card, calendar, and OpenClaw link."
                     />
                     <div className="site-onboarding-page__ready">
-                      <div className="site-onboarding-page__sequence-item site-onboarding-page__secret-card site-onboarding-page__snippet-card" style={getStaggerStyle(2)}>
+                      <div className="site-onboarding-page__sequence-item site-onboarding-page__secret-card site-onboarding-page__receipt-card" style={getStaggerStyle(2)}>
                         <code>{createdSiteDetail ? readyReceipt : "Provisioning identity..."}</code>
                         <button
                           className="site-onboarding-page__inline-action"
                           type="button"
-                          onClick={() => void copyOnboardingSnippet()}
+                          onClick={() => void copyOnboardingReceipt()}
                           disabled={!createdSiteDetail}
                         >
-                          {isSnippetCopied ? <Check size={16} aria-hidden="true" /> : <Copy size={16} aria-hidden="true" />}
-                          <span>{isSnippetCopied ? "Copied" : "Copy receipt"}</span>
+                          {isReceiptCopied ? <Check size={16} aria-hidden="true" /> : <Copy size={16} aria-hidden="true" />}
+                          <span>{isReceiptCopied ? "Copied" : "Copy receipt"}</span>
                         </button>
                       </div>
                       <div className="site-onboarding-page__sequence-item agent-identity-capabilities agent-identity-capabilities--onboarding" style={getStaggerStyle(3)}>
@@ -5297,7 +4408,7 @@ function OnboardingSubmitAction({ isLoading = false, label = "Continue" }: { isL
         disabled={isLoading}
         aria-busy={isLoading}
       >
-        {isLoading ? <span className="barkan-button-loader" aria-hidden="true" /> : <span>{label}</span>}
+        {isLoading ? <span className="aidentity-button-loader" aria-hidden="true" /> : <span>{label}</span>}
       </button>
     </div>
   );

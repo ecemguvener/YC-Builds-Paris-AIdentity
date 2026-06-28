@@ -4,10 +4,9 @@ import type { AppConfig } from "./config.js";
 import type { Collections, SiteDocument } from "./db.js";
 import { requireAuth } from "./auth.js";
 import { buildTrustedDashboardCorsHeaders } from "./cors.js";
-import { buildOpenAIEndpointUrl } from "./openai.js";
 import { createPurchaseFromPrompt, formatPurchaseAmount, PaymentError, provisionPaymentIdentity } from "./payments.js";
 import { EmailError, sendSiteEmailFromText } from "./email.js";
-import { PhoneCallError, placeAgentPhoneCall } from "./phone.js";
+import { PhoneCallError, placeAgentPhoneCall, waitForPhoneCallCompletion, type PhoneCallResult, type PhoneCallTranscriptTurn } from "./phone.js";
 
 const dashboardChatMessageSchema = z.object({
   role: z.enum(["user", "assistant"]),
@@ -18,16 +17,18 @@ const dashboardChatRequestSchema = z.object({
   messages: z.array(dashboardChatMessageSchema).min(1).max(24)
 });
 
+const openAIResponsesEndpoint = "https://api.openai.com/v1/responses";
+
 const openClawDashboardInstructions = `
-You are a simulated OpenClaw agent running inside the Barkan dashboard.
+You are a simulated OpenClaw agent running inside the Aidentity dashboard.
 
 Identity:
-- You are not the base dashboard assistant. You are the user's fake OpenClaw runtime with a Barkan real-world identity.
+- You are not the base dashboard assistant. You are the user's fake OpenClaw runtime with an Aidentity real-world identity.
 - Your available real-world tools include phone calls, email, payments, calendar, and dashboard context.
 - Phone calls are a normal part of your tool belt. If calling someone is the most direct way to complete a task, use the phone tool.
 
 Phone behavior:
-- Test-only barber rule: if the user specifically asks to book, schedule, or change an appointment at a barber shop/barbershop/barber, do not search the web and do not ask for a number. Call +33771594992. Treat it as the only barber shop number for this demo.
+- Test-only barber rule: if the user specifically asks to book, schedule, or change an appointment at a barber shop/barbershop/barber, do not search the web and do not ask for a number. Call +33757509222. Treat it as the only barber shop number for this demo.
 - Use web search when the user names a business/place/person but does not provide a phone number.
 - Prefer official or clearly authoritative public pages when selecting a phone number.
 - If the user provides a phone number, use it directly after normalizing it to E.164 when possible.
@@ -81,8 +82,9 @@ export function registerDashboardChatRoutes(app: FastifyInstance, collections: C
 
     try {
       const callerName = getUserCallerName(authContext.user.displayName, authContext.user.email);
-      const message = await runOpenClawDashboardChat(payload.messages, sites, config, request, callerName);
-      streamChatMessage(request, reply, config, message, config.OPENAI_DASHBOARD_CHAT_MODEL);
+      await streamOpenClawDashboardChat(request, reply, config, async (onCallEvent) =>
+        runOpenClawDashboardChat(payload.messages, sites, config, request, callerName, onCallEvent)
+      );
     } catch (error) {
       request.log.error({ error }, "dashboard chat OpenClaw request failed");
       return reply.code(502).send({ error: "AI response failed" });
@@ -104,12 +106,28 @@ interface OpenAIFunctionCall {
   argumentsText: string;
 }
 
+interface DashboardChatCallEvent {
+  type: "call_started" | "call_completed";
+  call: {
+    callId: string;
+    toNumber: string;
+    recipientName: string;
+    agentIdentityName: string;
+    task: string;
+    status: string;
+    simulated: boolean;
+    durationSecs?: number | null;
+    transcript?: PhoneCallTranscriptTurn[];
+  };
+}
+
 async function runOpenClawDashboardChat(
   messages: DashboardChatMessage[],
   sites: SiteDocument[],
   config: AppConfig,
   request: FastifyRequest,
-  callerName: string
+  callerName: string,
+  onCallEvent?: (event: DashboardChatCallEvent) => void
 ): Promise<string> {
   const input: Array<Record<string, unknown>> = messages.map((message) => ({
     role: message.role,
@@ -135,7 +153,7 @@ async function runOpenClawDashboardChat(
 
     input.push(...(response.output ?? []));
     for (const functionCall of functionCalls) {
-      const toolOutput = await runOpenClawTool(functionCall, sites, config, callerName);
+      const toolOutput = await runOpenClawTool(functionCall, sites, config, callerName, onCallEvent);
       toolResults.push(toolOutput);
       input.push({
         type: "function_call_output",
@@ -228,7 +246,7 @@ function buildOpenClawTools(includeWebSearch: boolean): Array<Record<string, unk
           },
           agent_identity_name: {
             type: "string",
-            description: "Barkan agent identity name to use for the call. Use the current/default identity when unsure."
+            description: "Aidentity agent identity name to use for the call. Use the current/default identity when unsure."
           },
           recipient_name: {
             type: "string",
@@ -250,11 +268,16 @@ function buildOpenClawTools(includeWebSearch: boolean): Array<Record<string, unk
   ];
 }
 
+function buildOpenAIEndpointUrl(): string {
+  return openAIResponsesEndpoint;
+}
+
 async function runOpenClawTool(
   functionCall: OpenAIFunctionCall,
   sites: SiteDocument[],
   config: AppConfig,
-  callerName: string
+  callerName: string,
+  onCallEvent?: (event: DashboardChatCallEvent) => void
 ): Promise<Record<string, unknown>> {
   if (functionCall.name !== "place_phone_call") {
     return {
@@ -265,6 +288,7 @@ async function runOpenClawTool(
 
   const parsedArguments = parseFunctionArguments(functionCall.argumentsText);
   const agentIdentityName = readNonEmptyString(parsedArguments.agent_identity_name) || sites[0]?.name || "OpenClaw Agent";
+  const recipientName = readNonEmptyString(parsedArguments.recipient_name) || "Recipient";
 
   try {
     const result = await placeAgentPhoneCall({
@@ -272,14 +296,34 @@ async function runOpenClawTool(
       task: readNonEmptyString(parsedArguments.task) || "",
       callerName,
       agentIdentityName,
-      recipientName: readNonEmptyString(parsedArguments.recipient_name),
+      recipientName,
       context: readNonEmptyString(parsedArguments.context),
       sourceUrl: readNonEmptyString(parsedArguments.source_url)
     }, config);
+    emitPhoneCallStarted(result, recipientName, onCallEvent);
+
+    const completion = await waitForPhoneCallCompletion(result, config);
+    onCallEvent?.({
+      type: "call_completed",
+      call: {
+        callId: result.callId,
+        toNumber: result.toNumber,
+        recipientName,
+        agentIdentityName: result.agentIdentityName,
+        task: result.task,
+        status: completion.status,
+        simulated: result.simulated,
+        durationSecs: completion.durationSecs,
+        transcript: completion.transcript
+      }
+    });
 
     return {
       tool: functionCall.name,
-      ...result
+      ...result,
+      finalStatus: completion.status,
+      durationSecs: completion.durationSecs,
+      transcript: completion.transcript
     };
   } catch (error) {
     if (error instanceof PhoneCallError) {
@@ -291,6 +335,25 @@ async function runOpenClawTool(
     }
     throw error;
   }
+}
+
+function emitPhoneCallStarted(
+  result: PhoneCallResult,
+  recipientName: string,
+  onCallEvent?: (event: DashboardChatCallEvent) => void
+) {
+  onCallEvent?.({
+    type: "call_started",
+    call: {
+      callId: result.callId,
+      toNumber: result.toNumber,
+      recipientName,
+      agentIdentityName: result.agentIdentityName,
+      task: result.task,
+      status: result.status,
+      simulated: result.simulated
+    }
+  });
 }
 
 function getUserCallerName(displayName: string | null | undefined, email: string): string {
@@ -372,7 +435,19 @@ function readNonEmptyString(value: unknown): string | null {
 }
 
 function isPurchaseIntent(text: string): boolean {
-  return /\b(buy|purchase|order|pay for|top up|grab me|get me|buy me)\b/i.test(text);
+  if (hasPhoneOrSchedulingIntent(text)) {
+    return false;
+  }
+
+  if (/\b(?:buy|purchase|order|pay for|top up|buy me)\b/i.test(text)) {
+    return true;
+  }
+
+  return /\b(?:grab|get) me\b/i.test(text) && /\b(?:from|at|on|via)\s+\S+/i.test(text);
+}
+
+function hasPhoneOrSchedulingIntent(text: string): boolean {
+  return /\b(?:call|phone|ring|dial|appointment|reservation|book|schedule|reschedule|barber|doctor|dentist)\b/i.test(text);
 }
 
 function resolvePurchaseSite(text: string, sites: SiteDocument[]): SiteDocument | null {
@@ -450,7 +525,7 @@ function streamChatMessage(
   reply: FastifyReply,
   config: AppConfig,
   text: string,
-  model = "barkan-tools"
+  model = "aidentity-tools"
 ) {
   const corsHeaders = buildTrustedDashboardCorsHeaders(request.headers.origin, config);
   reply.hijack();
@@ -467,6 +542,37 @@ function streamChatMessage(
   reply.raw.end();
 }
 
-function writeDashboardChatEvent(reply: FastifyReply, payload: Record<string, unknown>) {
+async function streamOpenClawDashboardChat(
+  request: FastifyRequest,
+  reply: FastifyReply,
+  config: AppConfig,
+  runChat: (onCallEvent: (event: DashboardChatCallEvent) => void) => Promise<string>
+) {
+  const corsHeaders = buildTrustedDashboardCorsHeaders(request.headers.origin, config);
+  reply.hijack();
+  reply.raw.writeHead(200, {
+    "content-type": "text/event-stream; charset=utf-8",
+    "cache-control": "no-cache, no-transform",
+    connection: "keep-alive",
+    "x-accel-buffering": "no",
+    ...corsHeaders
+  });
+
+  const writeEvent = (event: object) => writeDashboardChatEvent(reply, event);
+  writeEvent({ type: "ready", model: config.OPENAI_DASHBOARD_CHAT_MODEL });
+
+  try {
+    const text = await runChat((event) => writeEvent(event));
+    writeEvent({ type: "delta", text });
+    writeEvent({ type: "done" });
+  } catch (error) {
+    request.log.error({ error }, "dashboard chat stream failed");
+    writeEvent({ type: "error", error: "AI response failed" });
+  } finally {
+    reply.raw.end();
+  }
+}
+
+function writeDashboardChatEvent(reply: FastifyReply, payload: object) {
   reply.raw.write(`data: ${JSON.stringify(payload)}\n\n`);
 }

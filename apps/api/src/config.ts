@@ -19,17 +19,14 @@ const environmentSchema = z.object({
   API_PORT: z.coerce.number().default(4000),
   PUBLIC_APP_URL: z.string().url().default("http://localhost:5173"),
   PUBLIC_API_URL: z.string().url().default("http://localhost:4000"),
-  MONGODB_URI: z.string().min(1).default("mongodb://127.0.0.1:27017/barkan"),
-  SESSION_COOKIE_NAME: z.string().min(1).default("barkan_session"),
-  SESSION_SECRET: z.string().min(16).default("dev-barkan-session-secret-change-me"),
+  MONGODB_URI: z.string().min(1).default("mongodb://127.0.0.1:27017/aidentity"),
+  SESSION_COOKIE_NAME: z.string().min(1).default("aidentity_session"),
+  SESSION_SECRET: z.string().min(16).default("dev-aidentity-session-secret-change-me"),
   ELEVENLABS_API_KEY: optionalNonEmptyStringSchema,
   ELEVENLABS_AGENT_ID: optionalNonEmptyStringSchema,
   ELEVENLABS_AGENT_PHONE_NUMBER_ID: optionalNonEmptyStringSchema,
   ELEVENLABS_VOICE_ID: z.string().min(1).default("kPzsL2i3teMYv0FxEYQ6"),
   OPENAI_API_KEY: optionalNonEmptyStringSchema,
-  OPENAI_WIDGET_MODEL: z.string().min(1).default("gpt-5.4-2026-03-05").transform(normalizeConfiguredOpenAIWidgetModel),
-  OPENAI_ACTION_MODEL: z.string().min(1).default("gpt-5.4-2026-03-05").transform(normalizeConfiguredOpenAIModel),
-  OPENAI_ATLAS_MODEL: z.string().min(1).default("gpt-5.4-2026-03-05").transform(normalizeConfiguredOpenAIModel),
   OPENAI_DASHBOARD_CHAT_MODEL: z.string().min(1).default("gpt-5.4-2026-03-05").transform(normalizeConfiguredOpenAIModel),
   // Email capability add-on. When RESEND_API_KEY is unset the capability runs in
   // mock mode (it logs the message and returns a synthetic id) so the full flow
@@ -73,10 +70,6 @@ function normalizeConfiguredOpenAIModel(model: string): string {
   return normalized;
 }
 
-function normalizeConfiguredOpenAIWidgetModel(_model: string): string {
-  return "gpt-5.4-2026-03-05";
-}
-
 function normalizePublicApiUrlForEnvironment(publicApiUrl: string, nodeEnv: string): string {
   const normalizedUrl = publicApiUrl.trim().replace(/\/$/, "");
   if (nodeEnv !== "production") {
@@ -96,7 +89,7 @@ function isLoopbackHostname(hostname: string): boolean {
 }
 
 function normalizeMongoUriForEnvironment(mongodbUri: string, nodeEnv: string): string {
-  const mongodbUriWithDefaultDatabase = ensureMongoDatabaseName(mongodbUri, "barkan");
+  const mongodbUriWithDefaultDatabase = ensureMongoDatabaseName(mongodbUri, "aidentity");
   if (nodeEnv !== "production") {
     return mongodbUriWithDefaultDatabase;
   }
@@ -106,12 +99,12 @@ function normalizeMongoUriForEnvironment(mongodbUri: string, nodeEnv: string): s
 
 function normalizeLegacyMongoDatabaseName(mongodbUri: string): string {
   return replaceMongoDatabaseName(mongodbUri, (databaseName) => {
-    if (databaseName === "barkan-web") {
-      return "barkan";
+    if (databaseName === "aidentity-web") {
+      return "aidentity";
     }
 
-    if (databaseName === "barkan-web-prod") {
-      return "barkan-prod";
+    if (databaseName === "aidentity-web-prod") {
+      return "aidentity-prod";
     }
 
     return databaseName;
@@ -119,7 +112,7 @@ function normalizeLegacyMongoDatabaseName(mongodbUri: string): string {
 }
 
 function ensureProductionMongoDatabaseName(mongodbUri: string): string {
-  const defaultDatabaseName = "barkan-prod";
+  const defaultDatabaseName = "aidentity-prod";
 
   try {
     const parsedUri = new URL(mongodbUri);

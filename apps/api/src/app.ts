@@ -5,15 +5,12 @@ import { ZodError } from "zod";
 import type { AppConfig } from "./config.js";
 import type { Collections } from "./db.js";
 import { buildCorsOptionsForRequest, isPublicCorsPath, isTrustedDashboardOrigin } from "./cors.js";
-import { registerAtlasAgentBridge } from "./atlas/agent-bridge.js";
-import { registerAtlasRoutes } from "./atlas/routes.js";
 import { registerAuthRoutes } from "./auth.js";
 import { registerDashboardChatRoutes } from "./dashboard-chat.js";
 import { registerEmailRoutes, registerSiteEmailRoutes } from "./email.js";
 import { registerIdentityRoutes } from "./identity.js";
 import { registerPaymentRoutes, registerSitePaymentRoutes } from "./payments.js";
 import { registerSiteRoutes } from "./sites.js";
-import { registerWidgetRoutes } from "./widget.js";
 
 export async function buildApp(config: AppConfig, collections: Collections) {
   const app = fastify({
@@ -87,8 +84,6 @@ export async function buildApp(config: AppConfig, collections: Collections) {
 
   app.get("/api/health", async () => ({ ok: true }));
 
-  registerAtlasAgentBridge(app, collections, config);
-  registerAtlasRoutes(app, collections, config);
   registerAuthRoutes(app, collections, config);
   registerDashboardChatRoutes(app, collections, config);
   registerEmailRoutes(app, config);
@@ -97,7 +92,6 @@ export async function buildApp(config: AppConfig, collections: Collections) {
   registerPaymentRoutes(app, config);
   registerSitePaymentRoutes(app, collections, config);
   registerSiteRoutes(app, collections, config);
-  await registerWidgetRoutes(app, collections, config);
 
   return app;
 }

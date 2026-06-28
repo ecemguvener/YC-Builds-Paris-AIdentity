@@ -11,75 +11,66 @@ describe("loadConfig", () => {
     Object.assign(process.env, originalEnvironment);
   });
 
-  it("uses the configured dated models for the widget and action defaults", () => {
-    delete process.env.OPENAI_WIDGET_MODEL;
-    delete process.env.OPENAI_ACTION_MODEL;
-    delete process.env.OPENAI_ATLAS_MODEL;
+  it("uses the configured dated model for dashboard chat by default", () => {
+    delete process.env.OPENAI_DASHBOARD_CHAT_MODEL;
 
     const config = loadConfig();
 
-    expect(config.OPENAI_WIDGET_MODEL).toBe("gpt-5.4-2026-03-05");
-    expect(config.OPENAI_ACTION_MODEL).toBe("gpt-5.4-2026-03-05");
-    expect(config.OPENAI_ATLAS_MODEL).toBe("gpt-5.4-2026-03-05");
+    expect(config.OPENAI_DASHBOARD_CHAT_MODEL).toBe("gpt-5.4-2026-03-05");
   });
 
   it("normalizes undated and stale mini model overrides", () => {
     const undatedMiniModel = ["gpt", "5.4", "mini"].join("-");
-    const staleDatedMiniModel = `${undatedMiniModel}-${["2026", "03", "01"].join("-")}`;
-    process.env.OPENAI_WIDGET_MODEL = staleDatedMiniModel;
-    process.env.OPENAI_ACTION_MODEL = undatedMiniModel;
-    process.env.OPENAI_ATLAS_MODEL = undatedMiniModel;
+    process.env.OPENAI_DASHBOARD_CHAT_MODEL = undatedMiniModel;
 
     const config = loadConfig();
 
-    expect(config.OPENAI_WIDGET_MODEL).toBe("gpt-5.4-2026-03-05");
-    expect(config.OPENAI_ACTION_MODEL).toBe("gpt-5.4-mini-2026-03-17");
-    expect(config.OPENAI_ATLAS_MODEL).toBe("gpt-5.4-mini-2026-03-17");
+    expect(config.OPENAI_DASHBOARD_CHAT_MODEL).toBe("gpt-5.4-mini-2026-03-17");
   });
 
   it("keeps the configured MongoDB database name outside production", () => {
     process.env.NODE_ENV = "development";
-    process.env.MONGODB_URI = "mongodb://127.0.0.1:27017/barkan";
+    process.env.MONGODB_URI = "mongodb://127.0.0.1:27017/aidentity";
 
-    expect(loadConfig().MONGODB_URI).toBe("mongodb://127.0.0.1:27017/barkan");
+    expect(loadConfig().MONGODB_URI).toBe("mongodb://127.0.0.1:27017/aidentity");
   });
 
   it("rewrites the legacy MongoDB database name", () => {
     process.env.NODE_ENV = "development";
-    process.env.MONGODB_URI = "mongodb://127.0.0.1:27017/barkan-web";
+    process.env.MONGODB_URI = "mongodb://127.0.0.1:27017/aidentity-web";
 
-    expect(loadConfig().MONGODB_URI).toBe("mongodb://127.0.0.1:27017/barkan");
+    expect(loadConfig().MONGODB_URI).toBe("mongodb://127.0.0.1:27017/aidentity");
   });
 
-  it("uses barkan when a MongoDB URI has no database name", () => {
+  it("uses aidentity when a MongoDB URI has no database name", () => {
     process.env.NODE_ENV = "development";
     process.env.MONGODB_URI = "mongodb://127.0.0.1:27017";
 
-    expect(loadConfig().MONGODB_URI).toBe("mongodb://127.0.0.1:27017/barkan");
+    expect(loadConfig().MONGODB_URI).toBe("mongodb://127.0.0.1:27017/aidentity");
   });
 
   it("appends the production suffix to the MongoDB database name", () => {
     process.env.NODE_ENV = "production";
-    process.env.MONGODB_URI = "mongodb://127.0.0.1:27017/barkan";
+    process.env.MONGODB_URI = "mongodb://127.0.0.1:27017/aidentity";
     process.env.PUBLIC_API_URL = "http://localhost:4000";
 
-    expect(loadConfig().MONGODB_URI).toBe("mongodb://127.0.0.1:27017/barkan-prod");
+    expect(loadConfig().MONGODB_URI).toBe("mongodb://127.0.0.1:27017/aidentity-prod");
   });
 
   it("does not duplicate the production suffix", () => {
     process.env.NODE_ENV = "production";
-    process.env.MONGODB_URI = "mongodb://127.0.0.1:27017/barkan-prod";
+    process.env.MONGODB_URI = "mongodb://127.0.0.1:27017/aidentity-prod";
     process.env.PUBLIC_API_URL = "http://localhost:4000";
 
-    expect(loadConfig().MONGODB_URI).toBe("mongodb://127.0.0.1:27017/barkan-prod");
+    expect(loadConfig().MONGODB_URI).toBe("mongodb://127.0.0.1:27017/aidentity-prod");
   });
 
   it("rewrites the legacy production MongoDB database name", () => {
     process.env.NODE_ENV = "production";
-    process.env.MONGODB_URI = "mongodb://127.0.0.1:27017/barkan-web-prod";
+    process.env.MONGODB_URI = "mongodb://127.0.0.1:27017/aidentity-web-prod";
     process.env.PUBLIC_API_URL = "http://localhost:4000";
 
-    expect(loadConfig().MONGODB_URI).toBe("mongodb://127.0.0.1:27017/barkan-prod");
+    expect(loadConfig().MONGODB_URI).toBe("mongodb://127.0.0.1:27017/aidentity-prod");
   });
 
   it("requires HTTPS for non-local production API URLs", () => {

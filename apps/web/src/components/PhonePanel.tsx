@@ -24,7 +24,7 @@ export function PhonePanel({ siteName }: { siteName: string }) {
         <dl className="payments-policy">
           <div>
             <dt>Provider</dt>
-            <dd>ElevenLabs</dd>
+            <dd>Voice provider</dd>
           </div>
           <div>
             <dt>Mode</dt>

@@ -25,6 +25,23 @@ export interface PhoneCallResult {
   detail: string;
 }
 
+export interface PhoneCallTranscriptTurn {
+  role: string;
+  message: string;
+  timeInCallSecs: number | null;
+}
+
+export interface PhoneCallCompletion {
+  status: string;
+  durationSecs: number | null;
+  transcript: PhoneCallTranscriptTurn[];
+}
+
+interface PhoneCallCompletionOptions {
+  intervalMs?: number;
+  maxWaitMs?: number;
+}
+
 export class PhoneCallError extends Error {
   constructor(message: string) {
     super(message);
@@ -112,6 +129,127 @@ export async function placeAgentPhoneCall(request: PhoneCallRequest, config: App
     status: readString(responseJson.status) || "started",
     detail: "ElevenLabs outbound call started."
   };
+}
+
+export async function waitForPhoneCallCompletion(
+  call: PhoneCallResult,
+  config: AppConfig,
+  options: PhoneCallCompletionOptions = {}
+): Promise<PhoneCallCompletion> {
+  if (call.simulated || !config.ELEVENLABS_API_KEY || call.provider !== "elevenlabs") {
+    return {
+      status: "completed",
+      durationSecs: 0,
+      transcript: [
+        {
+          role: "agent",
+          message: "Mock call queued. A real ElevenLabs call will show the transcript here when it ends.",
+          timeInCallSecs: 0
+        }
+      ]
+    };
+  }
+
+  const intervalMs = options.intervalMs ?? 4000;
+  const maxWaitMs = options.maxWaitMs ?? 8 * 60 * 1000;
+  const startedAt = Date.now();
+  let latestCompletion: PhoneCallCompletion = {
+    status: call.status || "started",
+    durationSecs: null,
+    transcript: []
+  };
+
+  while (Date.now() - startedAt <= maxWaitMs) {
+    latestCompletion = await getElevenLabsConversationDetails(call.callId, config);
+    if (isTerminalConversationStatus(latestCompletion.status)) {
+      return latestCompletion;
+    }
+
+    await sleep(intervalMs);
+  }
+
+  return latestCompletion.transcript.length > 0
+    ? latestCompletion
+    : {
+        ...latestCompletion,
+        status: latestCompletion.status || "waiting"
+      };
+}
+
+async function getElevenLabsConversationDetails(
+  conversationId: string,
+  config: AppConfig
+): Promise<PhoneCallCompletion> {
+  const response = await fetch(`https://api.elevenlabs.io/v1/convai/conversations/${encodeURIComponent(conversationId)}`, {
+    method: "GET",
+    headers: {
+      "xi-api-key": config.ELEVENLABS_API_KEY ?? ""
+    }
+  });
+
+  const responseText = await response.text();
+  let responseJson: Record<string, unknown> = {};
+  try {
+    responseJson = responseText ? JSON.parse(responseText) as Record<string, unknown> : {};
+  } catch {
+    responseJson = {};
+  }
+
+  if (!response.ok) {
+    const detail = typeof responseJson.detail === "string"
+      ? responseJson.detail
+      : typeof responseJson.message === "string"
+        ? responseJson.message
+        : responseText.slice(0, 500) || "ElevenLabs conversation lookup failed.";
+    throw new PhoneCallError(detail);
+  }
+
+  const metadata = isRecord(responseJson.metadata) ? responseJson.metadata : {};
+  return {
+    status: readString(responseJson.status) || "processing",
+    durationSecs: readNumber(metadata.call_duration_secs),
+    transcript: readTranscript(responseJson.transcript)
+  };
+}
+
+function readTranscript(value: unknown): PhoneCallTranscriptTurn[] {
+  if (!Array.isArray(value)) {
+    return [];
+  }
+
+  return value.flatMap((entry) => {
+    if (!isRecord(entry)) {
+      return [];
+    }
+
+    const message = readString(entry.message);
+    if (!message) {
+      return [];
+    }
+
+    return [{
+      role: readString(entry.role) || "speaker",
+      message,
+      timeInCallSecs: readNumber(entry.time_in_call_secs)
+    }];
+  });
+}
+
+function isTerminalConversationStatus(status: string): boolean {
+  const normalizedStatus = status.toLowerCase();
+  return [
+    "done",
+    "completed",
+    "complete",
+    "ended",
+    "success",
+    "failed",
+    "error"
+  ].includes(normalizedStatus);
+}
+
+function sleep(ms: number): Promise<void> {
+  return new Promise((resolve) => setTimeout(resolve, ms));
 }
 
 function buildCallContext(context: string | null | undefined): string {
@@ -231,4 +369,12 @@ function normalizePhoneNumber(value: string): string | null {
 
 function readString(value: unknown): string | null {
   return typeof value === "string" && value.trim() ? value.trim() : null;
+}
+
+function readNumber(value: unknown): number | null {
+  return typeof value === "number" && Number.isFinite(value) ? value : null;
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return Boolean(value && typeof value === "object" && !Array.isArray(value));
 }

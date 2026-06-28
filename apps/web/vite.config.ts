@@ -3,7 +3,7 @@ import path from "node:path";
 import react from "@vitejs/plugin-react";
 import { defineConfig } from "vite";
 
-const homepageDirectory = path.resolve(__dirname, "public/barkan-homepage");
+const homepageDirectory = path.resolve(__dirname, "public/aidentity-homepage");
 
 function getHomepageFilePath(requestUrl: string | undefined) {
   if (!requestUrl) {
@@ -68,7 +68,7 @@ export default defineConfig({
   plugins: [
     react(),
     {
-      name: "barkan-homepage-root",
+      name: "aidentity-homepage-root",
       configureServer(server) {
         server.middlewares.use((request, response, next) => {
           if (request.method !== "GET" && request.method !== "HEAD") {
@@ -91,31 +91,6 @@ export default defineConfig({
           fs.createReadStream(filePath).pipe(response);
         });
       }
-    },
-    {
-      name: "barkan-widget-cors-preflight",
-      configureServer(server) {
-        server.middlewares.use((request, response, next) => {
-          if (request.method !== "OPTIONS" || !request.url?.startsWith("/api/widget/")) {
-            next();
-            return;
-          }
-
-          const origin = request.headers.origin;
-          if (typeof origin === "string") {
-            response.setHeader("Access-Control-Allow-Origin", origin);
-            response.setHeader("Vary", "Origin, Access-Control-Request-Headers");
-          }
-          response.setHeader("Access-Control-Allow-Credentials", "true");
-          response.setHeader("Access-Control-Allow-Methods", "GET,HEAD,POST,OPTIONS");
-          response.setHeader(
-            "Access-Control-Allow-Headers",
-            request.headers["access-control-request-headers"] || "content-type"
-          );
-          response.statusCode = 204;
-          response.end();
-        });
-      }
     }
   ],
   resolve: {
@@ -129,10 +104,6 @@ export default defineConfig({
       "/api": {
         target: process.env.API_PROXY_TARGET ?? "http://127.0.0.1:4001",
         changeOrigin: false
-      },
-      "/widget.js": {
-        target: process.env.API_PROXY_TARGET ?? "http://127.0.0.1:4001",
-        changeOrigin: true
       }
     }
   },

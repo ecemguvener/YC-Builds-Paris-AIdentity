@@ -42,7 +42,7 @@ export function createSitePreviewImage(): string {
   return SITE_PREVIEW_IMAGES[crypto.randomInt(SITE_PREVIEW_IMAGES.length)] ?? SITE_PREVIEW_IMAGES[0];
 }
 
-export function createBarkanApiKey(): string {
+export function createAidentityApiKey(): string {
   return `ck_${crypto.randomBytes(32).toString("base64url")}`;
 }
 
