@@ -52,7 +52,12 @@ const environmentSchema = z.object({
   AMAZON_HEADLESS: z.string().min(1).default("false"),
   // Playwright browser engine for Amazon automation: webkit (Safari engine),
   // chromium, or firefox.
-  AMAZON_BROWSER: z.enum(["webkit", "chromium", "firefox"]).default("webkit")
+  AMAZON_BROWSER: z.enum(["webkit", "chromium", "firefox"]).default("webkit"),
+  // Order defaults: preferred format (appended to the search), per-order budget
+  // cap (orders above it are blocked), and the saved card to pay with (last 4).
+  AMAZON_FORMAT: z.string().default("paperback"),
+  AMAZON_BUDGET_LIMIT: z.coerce.number().default(25),
+  AMAZON_PAYMENT_LAST4: optionalNonEmptyStringSchema
 }).transform((environment) => {
   return {
     ...environment,

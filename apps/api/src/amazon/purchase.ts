@@ -220,7 +220,11 @@ export async function placeAmazonOrder(query: string, approved: boolean, config:
       return result;
     }
     const searchBox = page.locator("#twotabsearchtextbox");
-    await searchBox.fill(query);
+    // Bias the search toward the preferred format (e.g. paperback) unless the
+    // query already names a format.
+    const fmt = (config.AMAZON_FORMAT || "").trim();
+    const searchQuery = fmt && !new RegExp(fmt, "i").test(query) ? `${query} ${fmt}` : query;
+    await searchBox.fill(searchQuery);
     await searchBox.press("Enter");
     await page.waitForLoadState("domcontentloaded");
 
@@ -238,6 +242,15 @@ export async function placeAmazonOrder(query: string, approved: boolean, config:
       (await page.locator("#corePrice_feature_div .a-offscreen, .a-price .a-offscreen").first().innerText().catch(() => ""))?.trim() ||
       null;
     await shot("product");
+
+    // --- Budget cap -------------------------------------------------------
+    const limit = config.AMAZON_BUDGET_LIMIT;
+    const priceValue = parsePrice(result.price);
+    if (limit > 0 && priceValue !== null && priceValue > limit) {
+      result.status = "blocked";
+      result.detail = `Item price ${result.price} exceeds the budget limit of ${limit}; not ordering.`;
+      return result;
+    }
 
     // --- Add to cart / Buy now -> proceed to checkout ---------------------
     const buyNow = page.locator("#buy-now-button");
@@ -265,8 +278,9 @@ export async function placeAmazonOrder(query: string, approved: boolean, config:
     // tries to pick it if an address chooser is shown.
     await ensurePresetAddress(page);
 
-    // Optional: enter a card from env only if a card form is present and the
-    // account has no usable default card. Prefer the account's default card.
+    // Select the saved card to pay with (by last 4); falls back to entering the
+    // env card if a card form is shown, else the account's default card.
+    await ensurePaymentMethod(page, config);
     await maybeEnterCardFromEnv(page);
 
     await shot("order-review");
@@ -313,23 +327,84 @@ export async function placeAmazonOrder(query: string, approved: boolean, config:
  */
 async function ensurePresetAddress(page: import("playwright").Page): Promise<void> {
   const line1 = process.env.AMAZON_SHIP_LINE1;
-  if (!line1) return;
   try {
-    const changeLink = page.locator("#addressChangeLinkId a, a:has-text('Change'), [data-testid='change-shipping-address']").first();
-    if (await changeLink.count()) {
-      await changeLink.click({ timeout: 5_000 }).catch(() => undefined);
+    // If an address is already chosen, open the chooser to switch.
+    const change = page.locator("#addressChangeLinkId a, a:has-text('Change'), [data-testid*='change']").first();
+    if (await change.count()) await change.click({ timeout: 4_000 }).catch(() => undefined);
+
+    // The address panel loads its list via AJAX ("Loading your address
+    // information…"). Wait for actual saved-address options to appear.
+    const optionSel =
+      "input[name='order.shipping.address'], input[name='shipToThisAddress'], li.displayAddressLI, [data-pmts-component-id^='address']";
+    await page.waitForSelector(optionSel, { timeout: 18_000 }).catch(() => undefined);
+
+    const rows = page.locator(
+      "li.displayAddressLI, [data-pmts-component-id^='address'], ul li:has(input[name='order.shipping.address']), div[role='radiogroup'] label"
+    );
+    const count = await rows.count().catch(() => 0);
+    if (!count) return; // no chooser shown — account default address is used
+
+    // Prefer the saved address matching AMAZON_SHIP_LINE1; else the first one.
+    let chosen = rows.first();
+    if (line1) {
+      for (let i = 0; i < count; i += 1) {
+        const text = (await rows.nth(i).innerText().catch(() => "")) || "";
+        if (text.toLowerCase().includes(line1.toLowerCase())) {
+          chosen = rows.nth(i);
+          break;
+        }
+      }
     }
-    const tile = page.locator(`.displayAddressLI:has-text("${line1}"), li:has-text("${line1}"), div:has-text("${line1}")`).first();
-    if (await tile.count()) {
-      const useButton = tile
-        .locator("input[type='radio'], input[name*='address'], button:has-text('Use this address'), a:has-text('Deliver to this address')")
-        .first();
-      if (await useButton.count()) await useButton.click({ timeout: 5_000 }).catch(() => undefined);
-      const confirm = page.locator("input[name='shipToThisAddress'], #shipToThisAddressButton input, button:has-text('Use this address')").first();
-      if (await confirm.count()) await confirm.click({ timeout: 5_000 }).catch(() => undefined);
-    }
+
+    const radio = chosen.locator("input[type='radio']").first();
+    if (await radio.count()) await radio.check({ timeout: 4_000 }).catch(() => undefined);
+    const useInRow = chosen
+      .locator("input[name='shipToThisAddress'], button:has-text('Use this address'), a:has-text('Deliver to this address'), input[type='submit']")
+      .first();
+    if (await useInRow.count()) await useInRow.click({ timeout: 5_000 }).catch(() => undefined);
+
+    // A global "Use this address" / continue button (turbo checkout).
+    const globalUse = page
+      .locator("input[name='shipToThisAddress'], #shipToThisAddressButton input, button:has-text('Use this address'), [data-testid='shipping-address-continue']")
+      .first();
+    if (await globalUse.count()) await globalUse.click({ timeout: 5_000 }).catch(() => undefined);
+
+    await page.waitForLoadState("domcontentloaded").catch(() => undefined);
+    await page.waitForTimeout(2_000);
   } catch {
     /* best effort — fall back to the account default address */
+  }
+}
+
+function parsePrice(price: string | null): number | null {
+  if (!price) return null;
+  const value = parseFloat(price.replace(/[^0-9.]/g, ""));
+  return Number.isFinite(value) ? value : null;
+}
+
+/** Select the saved card whose number ends in AMAZON_PAYMENT_LAST4. Best effort. */
+async function ensurePaymentMethod(page: import("playwright").Page, config: AppConfig): Promise<void> {
+  const last4 = (config.AMAZON_PAYMENT_LAST4 || "").trim();
+  if (!last4) return;
+  try {
+    const change = page.locator("#payChangeButtonId a, [data-testid*='payment'] a:has-text('Change'), a:has-text('Change payment method')").first();
+    if (await change.count()) await change.click({ timeout: 4_000 }).catch(() => undefined);
+    await page.waitForTimeout(1_500);
+    const cardRow = page
+      .locator(`li:has-text("${last4}"), [data-pmts-component-id*='instrument']:has-text("${last4}"), label:has-text("${last4}")`)
+      .first();
+    if (await cardRow.count()) {
+      const radio = cardRow.locator("input[type='radio']").first();
+      if (await radio.count()) await radio.check({ timeout: 4_000 }).catch(() => undefined);
+      else await cardRow.click({ timeout: 4_000 }).catch(() => undefined);
+      const use = page
+        .locator("button:has-text('Use this payment method'), input[aria-labelledby*='continue'], input[name*='SetPaymentPlanSelectContinue']")
+        .first();
+      if (await use.count()) await use.click({ timeout: 5_000 }).catch(() => undefined);
+      await page.waitForTimeout(1_500);
+    }
+  } catch {
+    /* best effort — fall back to default card / env card entry */
   }
 }
 
