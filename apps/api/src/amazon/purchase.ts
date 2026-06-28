@@ -78,7 +78,7 @@ export async function captureAmazonLogin(config: AppConfig): Promise<void> {
     const timer = setInterval(async () => {
       try {
         const cookies = await context.cookies();
-        if (cookies.some((c) => c.name === "at-main" || c.name === "sess-at-main")) {
+        if (cookies.some((c) => /^(?:at-|sess-at-)/.test(c.name))) {
           clearInterval(timer);
           resolve();
         }
@@ -145,7 +145,7 @@ export async function registerAmazonAccount(config: AppConfig): Promise<void> {
     const timer = setInterval(async () => {
       try {
         const cookies = await context.cookies();
-        if (cookies.some((c) => c.name === "at-main" || c.name === "sess-at-main")) {
+        if (cookies.some((c) => /^(?:at-|sess-at-)/.test(c.name))) {
           clearInterval(timer);
           resolve();
         }
