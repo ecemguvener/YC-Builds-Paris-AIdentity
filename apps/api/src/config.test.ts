@@ -62,6 +62,7 @@ describe("loadConfig", () => {
     process.env.NODE_ENV = "production";
     process.env.MONGODB_URI = "mongodb://127.0.0.1:27017/barkan";
     process.env.PUBLIC_API_URL = "http://localhost:4000";
+    process.env.SESSION_SECRET = "production-test-secret-value-long-enough";
 
     expect(loadConfig().MONGODB_URI).toBe("mongodb://127.0.0.1:27017/barkan-prod");
   });
@@ -70,6 +71,7 @@ describe("loadConfig", () => {
     process.env.NODE_ENV = "production";
     process.env.MONGODB_URI = "mongodb://127.0.0.1:27017/barkan-prod";
     process.env.PUBLIC_API_URL = "http://localhost:4000";
+    process.env.SESSION_SECRET = "production-test-secret-value-long-enough";
 
     expect(loadConfig().MONGODB_URI).toBe("mongodb://127.0.0.1:27017/barkan-prod");
   });
@@ -78,6 +80,7 @@ describe("loadConfig", () => {
     process.env.NODE_ENV = "production";
     process.env.MONGODB_URI = "mongodb://127.0.0.1:27017/barkan-web-prod";
     process.env.PUBLIC_API_URL = "http://localhost:4000";
+    process.env.SESSION_SECRET = "production-test-secret-value-long-enough";
 
     expect(loadConfig().MONGODB_URI).toBe("mongodb://127.0.0.1:27017/barkan-prod");
   });
@@ -85,6 +88,7 @@ describe("loadConfig", () => {
   it("requires HTTPS for non-local production API URLs", () => {
     process.env.NODE_ENV = "production";
     process.env.PUBLIC_API_URL = "http://100.81.152.74:4001";
+    process.env.SESSION_SECRET = "production-test-secret-value-long-enough";
 
     expect(() => loadConfig()).toThrow("PUBLIC_API_URL must use HTTPS");
   });
@@ -92,6 +96,7 @@ describe("loadConfig", () => {
   it("keeps localhost HTTP API URLs available for local production-style runs", () => {
     process.env.NODE_ENV = "production";
     process.env.PUBLIC_API_URL = "http://localhost:4001/";
+    process.env.SESSION_SECRET = "production-test-secret-value-long-enough";
 
     expect(loadConfig().PUBLIC_API_URL).toBe("http://localhost:4001");
   });

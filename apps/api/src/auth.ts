@@ -56,12 +56,28 @@ const updatePasswordSchema = z.object({
   newPassword: z.string().min(8).max(128)
 });
 
+const checkEmailRateLimitWindowMs = 60_000;
+const checkEmailRateLimitMax = 10;
+const checkEmailRateLimitBuckets = new Map<string, { windowStartedAt: number; count: number }>();
+
 export function registerAuthRoutes(
   app: FastifyInstance,
   collections: Collections,
   config: AppConfig
 ) {
-  app.post("/api/auth/check-email", async (request) => {
+  app.post("/api/auth/check-email", async (request, reply) => {
+    const clientIp = request.ip ?? "unknown";
+    const now = Date.now();
+    const bucket = checkEmailRateLimitBuckets.get(clientIp);
+    if (!bucket || now - bucket.windowStartedAt >= checkEmailRateLimitWindowMs) {
+      checkEmailRateLimitBuckets.set(clientIp, { windowStartedAt: now, count: 1 });
+    } else {
+      bucket.count += 1;
+      if (bucket.count > checkEmailRateLimitMax) {
+        return reply.code(429).header("retry-after", "60").send({ error: "too many requests" });
+      }
+    }
+
     const payload = emailLookupSchema.parse(request.body);
     const email = normalizeEmail(payload.email);
     const existingUser = await collections.users.findOne({ email }, { projection: { _id: 1 } });
