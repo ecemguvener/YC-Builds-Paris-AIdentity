@@ -2,6 +2,7 @@ export interface User {
   id: string;
   email: string;
   displayName: string | null;
+  phoneNumber: string | null;
   avatarUrl: string | null;
   notificationPreferences: UserNotificationPreferences;
   createdAt: string;
@@ -266,7 +267,7 @@ export const api = {
   markForcedLogout: () => localStorage.setItem(forcedLogoutStorageKey, "true"),
   clearForcedLogout: () => localStorage.removeItem(forcedLogoutStorageKey),
   me: () => apiRequest<{ user: User }>("/api/auth/me"),
-  updateProfile: (updates: { displayName?: string; email?: string; avatarUrl?: string | null }) =>
+  updateProfile: (updates: { displayName?: string; email?: string; phoneNumber?: string | null; avatarUrl?: string | null }) =>
     apiRequest<{ user: User }>("/api/auth/me", {
       method: "PATCH",
       body: JSON.stringify(updates)

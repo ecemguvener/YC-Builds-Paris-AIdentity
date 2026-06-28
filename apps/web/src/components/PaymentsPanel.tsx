@@ -1,6 +1,6 @@
-import { useCallback, useEffect, useMemo, useState } from "react";
-import { CreditCard, Loader2, Sparkles } from "lucide-react";
-import { api, type PaymentActivity, type PaymentRequestView, type ParsedPurchase } from "../api";
+import { useCallback, useEffect, useState } from "react";
+import { CreditCard, Loader2 } from "lucide-react";
+import { api, type PaymentActivity, type PaymentRequestView } from "../api";
 
 function formatMoney(amount: number, currency: string): string {
   const symbol = currency === "GBP" ? "£" : currency === "USD" ? "$" : currency === "EUR" ? "€" : "";
@@ -13,8 +13,6 @@ function statusLabel(status: string): string {
 
 export function PaymentsPanel({ siteId, siteName }: { siteId: string; siteName: string }) {
   const [activity, setActivity] = useState<PaymentActivity | null>(null);
-  const [prompt, setPrompt] = useState("");
-  const [parsed, setParsed] = useState<ParsedPurchase | null>(null);
   const [loading, setLoading] = useState(true);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
@@ -50,33 +48,10 @@ export function PaymentsPanel({ siteId, siteName }: { siteId: string; siteName: 
     [refresh]
   );
 
-  async function handleShop(event: React.FormEvent) {
-    event.preventDefault();
-    const instruction = prompt.trim();
-    if (!instruction) return;
-    setBusy(true);
-    setError("");
-    try {
-      const result = await api.siteRequestPurchaseFromText(siteId, instruction);
-      setParsed(result.parsed);
-      setPrompt("");
-      await refresh();
-    } catch (shopError) {
-      setParsed(null);
-      setError(shopError instanceof Error ? shopError.message : "Could not interpret that request");
-    } finally {
-      setBusy(false);
-    }
-  }
-
   const policy = activity?.policy ?? null;
   const requests = activity?.purchase_requests ?? [];
   const transactions = activity?.transactions ?? [];
   const card = activity?.payment_identity ?? null;
-  const examplePrompts = useMemo(
-    () => ["buy me still water from amazon", "Buy £15 of OpenAI credits", "order a USB-C charger from Amazon"],
-    []
-  );
 
   return (
     <div className="payments-panel-view">
@@ -97,46 +72,6 @@ export function PaymentsPanel({ siteId, siteName }: { siteId: string; siteName: 
       </header>
 
       {error ? <div className="payments-alert">{error}</div> : null}
-
-      <div className="payments-panel">
-        <h2 className="payments-panel__title">
-          <Sparkles size={15} aria-hidden="true" /> Shop
-        </h2>
-        <form className="payments-shop" onSubmit={handleShop}>
-          <input
-            className="payments-input"
-            value={prompt}
-            onChange={(event) => setPrompt(event.target.value)}
-            placeholder='e.g. "buy me still water from amazon"'
-            disabled={busy || loading}
-          />
-          <button className="payments-btn payments-btn--primary" type="submit" disabled={busy || loading}>
-            {busy ? <Loader2 size={15} className="payments-spin" aria-hidden="true" /> : "Buy"}
-          </button>
-        </form>
-        <div className="payments-examples">
-          {examplePrompts.map((example) => (
-            <button key={example} type="button" className="payments-chip" onClick={() => setPrompt(example)} disabled={busy}>
-              {example}
-            </button>
-          ))}
-        </div>
-        {parsed ? (
-          <p className="payments-parsed">
-            Parsed by <strong>{parsed.parsed_by}</strong>:{" "}
-            {parsed.merchant_url ? (
-              <a href={parsed.merchant_url} target="_blank" rel="noopener noreferrer">
-                {parsed.merchant_name}
-              </a>
-            ) : (
-              parsed.merchant_name
-            )}{" "}
-            · {formatMoney(parsed.amount, parsed.currency)}
-            {parsed.price_estimated ? " (est.)" : ""}
-            {parsed.item ? ` · ${parsed.item}` : ""}
-          </p>
-        ) : null}
-      </div>
 
       {policy ? (
         <div className="payments-panel">
@@ -173,7 +108,7 @@ export function PaymentsPanel({ siteId, siteName }: { siteId: string; siteName: 
       <div className="payments-panel">
         <h2 className="payments-panel__title">Purchase requests</h2>
         {requests.length === 0 ? (
-          <p className="payments-empty">No requests yet. Try the Shop box above, or ask in Chat.</p>
+          <p className="payments-empty">No requests yet.</p>
         ) : (
           <table className="payments-table">
             <thead>

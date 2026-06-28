@@ -25,9 +25,9 @@ describe("dashboard chat", () => {
     const sessionToken = "session_test";
     const user = createUser();
     const fetchMock = vi.fn<typeof fetch>().mockResolvedValueOnce(
-      new Response(openAIStreamText("Hello from Barkan."), {
+      Response.json({ output_text: "Hello from Barkan." }, {
         status: 200,
-        headers: { "content-type": "text/event-stream" }
+        headers: { "content-type": "application/json" }
       })
     );
     vi.stubGlobal("fetch", fetchMock);
@@ -155,6 +155,8 @@ function createUser(): UserDocument {
   return {
     _id: new ObjectId(),
     email: "dev@barkan.test",
+    displayName: "Dev Barkan",
+    phoneNumber: "+14155550198",
     passwordHash: "unused",
     createdAt: new Date()
   } as UserDocument;

@@ -35,6 +35,7 @@ describe("auth profile routes", () => {
       payload: {
         displayName: "Max Barkan",
         email: "MAX@Example.COM",
+        phoneNumber: "+14155550198",
         avatarUrl: "data:image/png;base64,aGVsbG8="
       }
     });
@@ -44,6 +45,7 @@ describe("auth profile routes", () => {
       id: String(user._id),
       displayName: "Max Barkan",
       email: "max@example.com",
+      phoneNumber: "+14155550198",
       avatarUrl: "data:image/png;base64,aGVsbG8="
     });
 
@@ -168,6 +170,7 @@ async function createUser(password = "password-test"): Promise<UserDocument> {
     _id: new ObjectId(),
     email: "dev@barkan.test",
     displayName: "Dev",
+    phoneNumber: null,
     notificationPreferences: {
       productEmails: true,
       documentationEmails: true,

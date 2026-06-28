@@ -1,7 +1,7 @@
 import type { FastifyInstance, FastifyReply, FastifyRequest } from "fastify";
 import { z } from "zod";
 import type { AppConfig } from "./config.js";
-import type { Collections, SiteDocument } from "./db.js";
+import type { Collections, SiteDocument, UserDocument } from "./db.js";
 import { requireAuth } from "./auth.js";
 import { buildTrustedDashboardCorsHeaders } from "./cors.js";
 import { buildOpenAIEndpointUrl } from "./openai.js";
@@ -27,6 +27,7 @@ Identity:
 - Phone calls are a normal part of your tool belt. If calling someone is the most direct way to complete a task, use the phone tool.
 
 Phone behavior:
+- If the user asks you to call them, call back later, or otherwise contact the user by phone, use Dashboard identity context user.phoneNumber when it is present. Do not search for the user's number in that case. Use "profile" as the source_url value for the call tool.
 - Test-only barber rule: if the user specifically asks to book, schedule, or change an appointment at a barber shop/barbershop/barber, do not search the web and do not ask for a number. Call +33757509222. Treat it as the only barber shop number for this demo.
 - Use web search when the user names a business/place/person but does not provide a phone number.
 - Prefer official or clearly authoritative public pages when selecting a phone number.
@@ -78,7 +79,7 @@ export function registerDashboardChatRoutes(app: FastifyInstance, collections: C
     }
 
     try {
-      const message = await runOpenClawDashboardChat(payload.messages, sites, config, request);
+      const message = await runOpenClawDashboardChat(payload.messages, sites, authContext.user, config, request);
       streamChatMessage(request, reply, config, message, config.OPENAI_DASHBOARD_CHAT_MODEL);
     } catch (error) {
       request.log.error({ error }, "dashboard chat OpenClaw request failed");
@@ -104,6 +105,7 @@ interface OpenAIFunctionCall {
 async function runOpenClawDashboardChat(
   messages: DashboardChatMessage[],
   sites: SiteDocument[],
+  user: UserDocument,
   config: AppConfig,
   request: FastifyRequest
 ): Promise<string> {
@@ -114,7 +116,7 @@ async function runOpenClawDashboardChat(
   const toolResults: Array<Record<string, unknown>> = [];
 
   for (let step = 0; step < 3; step++) {
-    const response = await createOpenClawResponse(input, sites, config, request, step === 0);
+    const response = await createOpenClawResponse(input, sites, user, config, request, step === 0);
     const functionCalls = extractFunctionCalls(response);
     if (functionCalls.length === 0) {
       const text = extractOpenAIResponseText(response);
@@ -147,13 +149,14 @@ async function runOpenClawDashboardChat(
 async function createOpenClawResponse(
   input: Array<Record<string, unknown>>,
   sites: SiteDocument[],
+  user: UserDocument,
   config: AppConfig,
   request: FastifyRequest,
   includeWebSearch: boolean
 ): Promise<OpenAIResponseObject> {
   const body = {
     model: config.OPENAI_DASHBOARD_CHAT_MODEL,
-    instructions: buildOpenClawInstructions(sites),
+    instructions: buildOpenClawInstructions(sites, user),
     input,
     tools: buildOpenClawTools(includeWebSearch),
     tool_choice: "auto",
@@ -179,18 +182,24 @@ async function createOpenClawResponse(
   const responseText = await response.text();
   if (includeWebSearch && /web_search|web search|tool/i.test(responseText)) {
     request.log.warn({ status: response.status, body: responseText }, "dashboard chat retrying without hosted web search");
-    return createOpenClawResponse(input, sites, config, request, false);
+    return createOpenClawResponse(input, sites, user, config, request, false);
   }
 
   request.log.error({ status: response.status, body: responseText }, "dashboard chat OpenAI request failed");
   throw new Error("AI response failed");
 }
 
-function buildOpenClawInstructions(sites: SiteDocument[]): string {
+function buildOpenClawInstructions(sites: SiteDocument[], user: UserDocument): string {
   return `${openClawDashboardInstructions}
 
 Dashboard identity context:
 ${JSON.stringify({
+  user: {
+    id: String(user._id),
+    email: user.email,
+    displayName: user.displayName ?? null,
+    phoneNumber: user.phoneNumber ?? null
+  },
   agentIdentities: sites.map((site) => ({
     id: String(site._id),
     name: site.name,

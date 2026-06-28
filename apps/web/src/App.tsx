@@ -1,6 +1,5 @@
 import {
   ArrowLeft,
-  BookOpen,
   Box,
   Braces,
   CalendarDays,
@@ -8,7 +7,6 @@ import {
   Copy,
   CreditCard,
   FileText,
-  KeyRound,
   Loader2,
   LogOut,
   LockKeyhole,
@@ -16,7 +14,6 @@ import {
   Menu,
   Phone,
   Plus,
-  Search,
   Server,
   Sparkles,
   Target,
@@ -36,20 +33,14 @@ import { PaymentsPanel } from "./components/PaymentsPanel";
 import { EmailPanel } from "./components/EmailPanel";
 import {
   api,
-  type AtlasBackendInventoryDocument,
-  type AtlasRouteMapDocument,
   type ChatTheme,
   type DashboardChatMessageInput,
   type DocumentationGenerationResult,
-  type DocumentationAgentStatus,
   type DocumentationGenerationEvent,
-  type DocumentationGenerationStatus,
   type DocumentationGenerationStep,
   type Site,
   type SiteApiKey,
-  type SiteBackendDocumentation,
   type SiteDetailResponse,
-  type SiteDocumentation,
   type User
 } from "./api";
 import barkanMarkDark from "./assets/barkan/brand/barkan-mark-dark.svg";
@@ -85,9 +76,8 @@ type DashboardChatMessage = {
     entries: Array<{ question: string; answer: string }>;
   };
 };
-type SiteDetailTab = "credentials" | "installation" | "documentation" | "theme" | "payments" | "email";
+type SiteDetailTab = "credentials" | "installation" | "theme" | "payments" | "email";
 type UserSettingsSection = "profile" | "security" | "notifications" | "billing";
-type DocumentationView = "frontend" | "backend";
 type PanelState = "active" | "hidden" | "incoming" | "outgoing";
 type DocumentationProgressStep = "connection" | DocumentationGenerationStep;
 type DocumentationStepProgress = Partial<Record<DocumentationProgressStep, { current: number; total: number; label?: string }>>;
@@ -295,7 +285,7 @@ function getSiteDetailRoute(path: string, search = ""): { siteId: string; tab: S
 
   const rawTab = new URLSearchParams(search).get("tab");
   const tab =
-    rawTab === "documentation" || rawTab === "installation" || rawTab === "theme" || rawTab === "payments" || rawTab === "email"
+    rawTab === "installation" || rawTab === "theme" || rawTab === "payments" || rawTab === "email"
       ? rawTab
       : "credentials";
 
@@ -368,33 +358,12 @@ function formatSiteRelativeTime(value: string) {
   return `Updated ${elapsedDays}d ago`;
 }
 
-function formatDocumentationTimestamp(value: string | undefined) {
-  if (!value) {
-    return "Not generated yet";
-  }
-
-  const timestamp = new Date(value);
-  if (Number.isNaN(timestamp.getTime())) {
-    return "Generated recently";
-  }
-
-  return `Generated ${timestamp.toLocaleDateString(undefined, {
-    month: "short",
-    day: "numeric",
-    year: "numeric"
-  })}`;
-}
-
 export function App() {
   const [currentLocation, setCurrentLocation] = useState(getCurrentLocation);
   const [user, setUser] = useState<User | null>(null);
   const [sites, setSites] = useState<Site[]>([]);
   const [selectedSnippet, setSelectedSnippet] = useState("");
   const [selectedApiKeys, setSelectedApiKeys] = useState<SiteApiKey[]>([]);
-  const [selectedDocumentation, setSelectedDocumentation] = useState<SiteDocumentation>(null);
-  const [selectedBackendDocumentation, setSelectedBackendDocumentation] = useState<SiteBackendDocumentation>(null);
-  const [selectedDocumentationAgent, setSelectedDocumentationAgent] = useState<DocumentationAgentStatus | null>(null);
-  const [selectedDocumentationGeneration, setSelectedDocumentationGeneration] = useState<DocumentationGenerationStatus | null>(null);
   const [backgroundDocumentationGenerations, setBackgroundDocumentationGenerations] = useState<BackgroundDocumentationGeneration[]>([]);
   const backgroundDocumentationGenerationsRef = useRef<BackgroundDocumentationGeneration[]>([]);
   const selectedSiteIdRef = useRef<string | null>(null);
@@ -449,16 +418,6 @@ export function App() {
     () => sites.find((site) => site.id === selectedSiteId) ?? null,
     [selectedSiteId, sites]
   );
-  const selectedSiteBackgroundDocumentationGeneration = useMemo(
-    () =>
-      selectedSite
-        ? backgroundDocumentationGenerations.find(
-            (generation) => generation.siteId === selectedSite.id && generation.status === "running"
-          ) ?? null
-        : null,
-    [backgroundDocumentationGenerations, selectedSite]
-  );
-
   useEffect(() => {
     backgroundDocumentationGenerationsRef.current = backgroundDocumentationGenerations;
   }, [backgroundDocumentationGenerations]);
@@ -473,10 +432,6 @@ export function App() {
     } else {
       setSelectedSnippet("");
       setSelectedApiKeys([]);
-      setSelectedDocumentation(null);
-      setSelectedBackendDocumentation(null);
-      setSelectedDocumentationAgent(null);
-      setSelectedDocumentationGeneration(null);
     }
   }, [selectedSite?.id]);
 
@@ -527,10 +482,6 @@ export function App() {
     );
     setSelectedSnippet(response.snippet);
     setSelectedApiKeys(response.apiKeys);
-    setSelectedDocumentation(response.documentation);
-    setSelectedBackendDocumentation(response.backendDocumentation);
-    setSelectedDocumentationAgent(response.documentationAgent);
-    setSelectedDocumentationGeneration(response.documentationGeneration);
   }
 
   async function handleLogout() {
@@ -544,10 +495,6 @@ export function App() {
       setSites([]);
       setSelectedSnippet("");
       setSelectedApiKeys([]);
-      setSelectedDocumentation(null);
-      setSelectedBackendDocumentation(null);
-      setSelectedDocumentationAgent(null);
-      setSelectedDocumentationGeneration(null);
       navigateToPublicHome();
     }
   }
@@ -579,10 +526,6 @@ export function App() {
     }
     setSelectedSnippet("");
     setSelectedApiKeys([]);
-    setSelectedDocumentation(null);
-    setSelectedBackendDocumentation(null);
-    setSelectedDocumentationAgent(null);
-    setSelectedDocumentationGeneration(null);
     replacePath(dashboardPath);
   }
 
@@ -697,14 +640,7 @@ export function App() {
     );
   }
 
-  function handleBackgroundDocumentationGenerationCompleted(projectId: string, result: DocumentationGenerationResult) {
-    const generation = backgroundDocumentationGenerationsRef.current.find((currentGeneration) => currentGeneration.projectId === projectId);
-    if (generation?.siteId && selectedSiteIdRef.current === generation.siteId) {
-      setSelectedDocumentation(result.documentation);
-      setSelectedBackendDocumentation(result.backendDocumentation);
-      setSelectedDocumentationGeneration(null);
-    }
-
+  function handleBackgroundDocumentationGenerationCompleted(projectId: string, _result: DocumentationGenerationResult) {
     setBackgroundDocumentationGenerations((currentGenerations) =>
       currentGenerations.filter((currentGeneration) => currentGeneration.projectId !== projectId)
     );
@@ -727,10 +663,6 @@ export function App() {
     setSites((currentSites) => currentSites.filter((site) => site.id !== siteId));
     setSelectedSnippet("");
     setSelectedApiKeys([]);
-    setSelectedDocumentation(null);
-    setSelectedBackendDocumentation(null);
-    setSelectedDocumentationAgent(null);
-    setSelectedDocumentationGeneration(null);
     replacePath(dashboardPath);
   }
 
@@ -794,11 +726,6 @@ export function App() {
         activeUserSettingsSection={activeUserSettingsSection}
         selectedSnippet={selectedSnippet}
         selectedApiKeys={selectedApiKeys}
-        selectedDocumentation={selectedDocumentation}
-        selectedBackendDocumentation={selectedBackendDocumentation}
-        selectedDocumentationAgent={selectedDocumentationAgent}
-        selectedDocumentationGeneration={selectedDocumentationGeneration}
-        selectedBackgroundDocumentationGeneration={selectedSiteBackgroundDocumentationGeneration}
         onCreateSite={() => pushPath(newSitePath)}
         onLogout={handleLogout}
         onSelectSite={(siteId) => pushPath(getSiteDetailPath(siteId, "credentials"))}
@@ -812,23 +739,12 @@ export function App() {
         onApiKeyDeleted={(apiKeyId) =>
           setSelectedApiKeys((currentApiKeys) => currentApiKeys.filter((apiKey) => apiKey.id !== apiKeyId))
         }
-        onDocumentationGenerated={(result) => {
-          setSelectedDocumentation(result.documentation);
-          setSelectedBackendDocumentation(result.backendDocumentation);
-          setSelectedDocumentationGeneration(null);
-        }}
-        onDocumentationAgentLoaded={setSelectedDocumentationAgent}
-        onSiteDetailLoaded={applySiteDetailResponse}
         onSiteUpdated={handleSiteUpdated}
         onSiteDeleted={handleSiteDeleted}
         onNotify={showNotification}
         onCloseDetail={() => {
           setSelectedSnippet("");
           setSelectedApiKeys([]);
-          setSelectedDocumentation(null);
-          setSelectedBackendDocumentation(null);
-          setSelectedDocumentationAgent(null);
-          setSelectedDocumentationGeneration(null);
           replacePath(dashboardPath);
         }}
       />
@@ -1885,11 +1801,6 @@ function DashboardScreen({
   activeUserSettingsSection,
   selectedSnippet,
   selectedApiKeys,
-  selectedDocumentation,
-  selectedBackendDocumentation,
-  selectedDocumentationAgent,
-  selectedDocumentationGeneration,
-  selectedBackgroundDocumentationGeneration,
   onCreateSite,
   onLogout,
   onSelectSite,
@@ -1901,9 +1812,6 @@ function DashboardScreen({
   onSiteDetailTabChange,
   onApiKeyCreated,
   onApiKeyDeleted,
-  onDocumentationGenerated,
-  onDocumentationAgentLoaded,
-  onSiteDetailLoaded,
   onSiteUpdated,
   onSiteDeleted,
   onNotify,
@@ -1918,11 +1826,6 @@ function DashboardScreen({
   activeUserSettingsSection: UserSettingsSection;
   selectedSnippet: string;
   selectedApiKeys: SiteApiKey[];
-  selectedDocumentation: SiteDocumentation;
-  selectedBackendDocumentation: SiteBackendDocumentation;
-  selectedDocumentationAgent: DocumentationAgentStatus | null;
-  selectedDocumentationGeneration: DocumentationGenerationStatus | null;
-  selectedBackgroundDocumentationGeneration: BackgroundDocumentationGeneration | null;
   onCreateSite: () => void;
   onLogout: () => void;
   onSelectSite: (siteId: string) => void;
@@ -1934,9 +1837,6 @@ function DashboardScreen({
   onSiteDetailTabChange: (siteId: string, tab: SiteDetailTab) => void;
   onApiKeyCreated: (apiKey: SiteApiKey) => void;
   onApiKeyDeleted: (apiKeyId: string) => void;
-  onDocumentationGenerated: (result: DocumentationGenerationResult) => void;
-  onDocumentationAgentLoaded: (agent: DocumentationAgentStatus | null) => void;
-  onSiteDetailLoaded: (detail: SiteDetailResponse) => void;
   onSiteUpdated: (site: Site, snippet?: string) => void;
   onSiteDeleted: (siteId: string) => void;
   onNotify: (notification: ToastNotificationInput) => void;
@@ -2010,16 +1910,8 @@ function DashboardScreen({
           activeTab={activeSiteDetailTab}
           snippet={selectedSnippet}
           apiKeys={selectedApiKeys}
-          documentation={selectedDocumentation}
-          backendDocumentation={selectedBackendDocumentation}
-          documentationAgent={selectedDocumentationAgent}
-          documentationGeneration={selectedDocumentationGeneration}
-          backgroundDocumentationGeneration={selectedBackgroundDocumentationGeneration}
           onApiKeyCreated={onApiKeyCreated}
           onApiKeyDeleted={onApiKeyDeleted}
-          onDocumentationGenerated={onDocumentationGenerated}
-          onDocumentationAgentLoaded={onDocumentationAgentLoaded}
-          onSiteDetailLoaded={onSiteDetailLoaded}
           onSiteUpdated={onSiteUpdated}
           onSiteDeleted={onSiteDeleted}
           onNotify={onNotify}
@@ -2637,6 +2529,7 @@ function UserSettingsPage({
 }) {
   const [displayName, setDisplayName] = useState(user.displayName ?? getDashboardChatGreetingName(user.email));
   const [email, setEmail] = useState(user.email);
+  const [phoneNumber, setPhoneNumber] = useState(user.phoneNumber ?? "");
   const [avatarUrl, setAvatarUrl] = useState(user.avatarUrl ?? "");
   const [avatarInputKey, setAvatarInputKey] = useState(0);
   const [productEmails, setProductEmails] = useState(user.notificationPreferences.productEmails);
@@ -2657,11 +2550,14 @@ function UserSettingsPage({
   const initials = getUserInitials(displayName, email);
   const normalizedDisplayName = displayName.trim();
   const normalizedEmail = email.trim();
+  const normalizedPhoneNumber = phoneNumber.trim() || null;
   const normalizedAvatarUrl = avatarUrl.trim() || null;
   const currentAvatarUrl = user.avatarUrl ?? null;
+  const currentPhoneNumber = user.phoneNumber ?? null;
   const hasProfileChanges =
     normalizedDisplayName !== (user.displayName ?? getDashboardChatGreetingName(user.email)) ||
     normalizedEmail !== user.email ||
+    normalizedPhoneNumber !== currentPhoneNumber ||
     normalizedAvatarUrl !== currentAvatarUrl;
   const hasNotificationChanges =
     productEmails !== user.notificationPreferences.productEmails ||
@@ -2671,6 +2567,7 @@ function UserSettingsPage({
   useEffect(() => {
     setDisplayName(user.displayName ?? getDashboardChatGreetingName(user.email));
     setEmail(user.email);
+    setPhoneNumber(user.phoneNumber ?? "");
     setAvatarUrl(user.avatarUrl ?? "");
     setProductEmails(user.notificationPreferences.productEmails);
     setDocumentationEmails(user.notificationPreferences.documentationEmails);
@@ -2690,6 +2587,7 @@ function UserSettingsPage({
       const response = await api.updateProfile({
         displayName: normalizedDisplayName,
         email: normalizedEmail,
+        phoneNumber: normalizedPhoneNumber,
         avatarUrl: normalizedAvatarUrl
       });
       onUserUpdated(response.user);
@@ -2890,6 +2788,7 @@ function UserSettingsPage({
                     </div>
                     <strong>{displayName || email}</strong>
                     <p>{email}</p>
+                    {normalizedPhoneNumber ? <p>{normalizedPhoneNumber}</p> : null}
                     <div className="user-settings-page__avatar-actions">
                       <label className="user-settings-page__avatar-upload" htmlFor={avatarInputId}>
                         <input
@@ -2918,6 +2817,17 @@ function UserSettingsPage({
                 <label className="site-detail-page__field">
                   <span>Email</span>
                   <input value={email} onChange={(event) => setEmail(event.target.value)} />
+                </label>
+
+                <label className="site-detail-page__field">
+                  <span>Phone number</span>
+                  <input
+                    type="tel"
+                    value={phoneNumber}
+                    onChange={(event) => setPhoneNumber(event.target.value)}
+                    placeholder="+1 415 555 0198"
+                    autoComplete="tel"
+                  />
                 </label>
               </div>
 
@@ -3362,16 +3272,8 @@ function SiteDetailOverlay({
   activeTab,
   snippet,
   apiKeys,
-  documentation,
-  backendDocumentation,
-  documentationAgent,
-  documentationGeneration,
-  backgroundDocumentationGeneration,
   onApiKeyCreated,
   onApiKeyDeleted,
-  onDocumentationGenerated,
-  onDocumentationAgentLoaded,
-  onSiteDetailLoaded,
   onSiteUpdated,
   onSiteDeleted,
   onNotify,
@@ -3382,23 +3284,14 @@ function SiteDetailOverlay({
   activeTab: SiteDetailTab;
   snippet: string;
   apiKeys: SiteApiKey[];
-  documentation: SiteDocumentation;
-  backendDocumentation: SiteBackendDocumentation;
-  documentationAgent: DocumentationAgentStatus | null;
-  documentationGeneration: DocumentationGenerationStatus | null;
-  backgroundDocumentationGeneration: BackgroundDocumentationGeneration | null;
   onApiKeyCreated: (apiKey: SiteApiKey) => void;
   onApiKeyDeleted: (apiKeyId: string) => void;
-  onDocumentationGenerated: (result: DocumentationGenerationResult) => void;
-  onDocumentationAgentLoaded: (agent: DocumentationAgentStatus | null) => void;
-  onSiteDetailLoaded: (detail: SiteDetailResponse) => void;
   onSiteUpdated: (site: Site, snippet?: string) => void;
   onSiteDeleted: (siteId: string) => void;
   onNotify: (notification: ToastNotificationInput) => void;
   onTabChange: (tab: SiteDetailTab) => void;
   onClose: () => void;
 }) {
-  const [activeDocumentationView, setActiveDocumentationView] = useState<DocumentationView>("frontend");
   const [draftName, setDraftName] = useState(site.name);
   const [draftDomain, setDraftDomain] = useState(site.domain);
   const [draftDescription, setDraftDescription] = useState("");
@@ -3417,17 +3310,6 @@ function SiteDetailOverlay({
   const [copiedApiKeyId, setCopiedApiKeyId] = useState<string | null>(null);
   const [isDeletingSite, setIsDeletingSite] = useState(false);
   const [siteDeleteError, setSiteDeleteError] = useState("");
-  const [documentationSearch, setDocumentationSearch] = useState("");
-  const [generationError, setGenerationError] = useState("");
-  const [isStartingDocumentationGeneration, setIsStartingDocumentationGeneration] = useState(false);
-  const [isGeneratingDocumentation, setIsGeneratingDocumentation] = useState(false);
-  const [activeGenerationStep, setActiveGenerationStep] = useState<DocumentationProgressStep | null>(null);
-  const [completedGenerationSteps, setCompletedGenerationSteps] = useState<Set<DocumentationProgressStep>>(
-    () => new Set()
-  );
-  const [generationStepProgress, setGenerationStepProgress] = useState<
-    Partial<Record<DocumentationProgressStep, { current: number; total: number; label?: string }>>
-  >({});
   useEffect(() => {
     setDraftName(site.name);
     setDraftDomain(site.domain);
@@ -3584,138 +3466,6 @@ function SiteDetailOverlay({
     }
   }
 
-  const filteredDocumentationRoutes = useMemo(() => {
-    if (!documentation) {
-      return [];
-    }
-
-    const query = documentationSearch.trim().toLowerCase();
-    if (!query) {
-      return documentation.routes;
-    }
-
-    return documentation.routes.filter((route) =>
-      `${route.path} ${route.summary}`.toLowerCase().includes(query)
-    );
-  }, [documentation, documentationSearch]);
-
-  const filteredBackendEndpoints = useMemo(() => {
-    if (!backendDocumentation) {
-      return [];
-    }
-
-    const query = documentationSearch.trim().toLowerCase();
-    if (!query) {
-      return backendDocumentation.endpoints;
-    }
-
-    return backendDocumentation.endpoints.filter((endpoint) =>
-      [
-        endpoint.method,
-        endpoint.path,
-        endpoint.summary,
-        endpoint.auth,
-        endpoint.response.success,
-        ...endpoint.response.errors
-      ].join(" ").toLowerCase().includes(query)
-    );
-  }, [backendDocumentation, documentationSearch]);
-  const activeDocumentationGeneration = backgroundDocumentationGeneration?.status === "running"
-    ? backgroundDocumentationGeneration
-    : documentationGeneration?.status === "running"
-      ? {
-          activeStep: documentationGeneration.activeStep,
-          completedSteps: new Set(documentationGeneration.completedSteps),
-          stepProgress: documentationGeneration.stepProgress
-        }
-      : null;
-
-  async function generateDocumentation() {
-    await runDocumentationGeneration();
-  }
-
-  async function runDocumentationGeneration() {
-    setGenerationError("");
-    setIsStartingDocumentationGeneration(true);
-    setIsGeneratingDocumentation(false);
-    setActiveGenerationStep("connection");
-    setCompletedGenerationSteps(new Set());
-    setGenerationStepProgress({
-      connection: { current: 0, total: 1, label: "Checking connection" }
-    });
-
-    try {
-      const agentResponse = await api.getSiteDocumentationAgent(site.id);
-      onDocumentationAgentLoaded(agentResponse.documentationAgent);
-      if (!agentResponse.documentationAgent?.connected) {
-        setGenerationError("Run npx barkan connect from the client codebase before regenerating documentation.");
-        return;
-      }
-
-      setCompletedGenerationSteps(new Set(["connection"]));
-      setGenerationStepProgress({
-        connection: { current: 1, total: 1, label: "Connected" }
-      });
-      const generatedDocumentation = await api.generateSiteDocumentation(site.id, handleDocumentationGenerationEvent);
-      onDocumentationGenerated(generatedDocumentation);
-      setDocumentationSearch("");
-      onNotify({
-        title: "Documentation generated"
-      });
-    } catch (generateError) {
-      const errorMessage = getErrorMessage(generateError, "Could not generate documentation");
-      if (errorMessage.includes("Documentation generation is already running")) {
-        try {
-          onSiteDetailLoaded(await api.getSite(site.id));
-          return;
-        } catch {
-          // Keep the original generation error visible if the follow-up state refresh fails.
-        }
-      }
-      setGenerationError(errorMessage);
-    } finally {
-      setIsStartingDocumentationGeneration(false);
-      setIsGeneratingDocumentation(false);
-      setActiveGenerationStep(null);
-    }
-  }
-
-  function handleDocumentationGenerationEvent(event: DocumentationGenerationEvent) {
-    if (event.type === "step_started") {
-      setIsStartingDocumentationGeneration(false);
-      setIsGeneratingDocumentation(true);
-      setActiveGenerationStep(event.step);
-      if (typeof event.total === "number") {
-        setGenerationStepProgress((currentProgress) => ({
-          ...currentProgress,
-          [event.step]: { current: 0, total: event.total }
-        }));
-      }
-      return;
-    }
-
-    if (event.type === "step_progress") {
-      setIsStartingDocumentationGeneration(false);
-      setIsGeneratingDocumentation(true);
-      setActiveGenerationStep(event.step);
-      setGenerationStepProgress((currentProgress) => ({
-        ...currentProgress,
-        [event.step]: { current: event.current, total: event.total, label: event.label }
-      }));
-      return;
-    }
-
-    if (event.type === "step_completed") {
-      setCompletedGenerationSteps((currentSteps) => new Set([...currentSteps, event.step]));
-      if (typeof event.current === "number" && typeof event.total === "number") {
-        setGenerationStepProgress((currentProgress) => ({
-          ...currentProgress,
-          [event.step]: { current: event.current, total: event.total }
-        }));
-      }
-    }
-  }
-
   const normalizedDraftName = draftName.trim();
   const normalizedDraftDomain = draftDomain.trim();
   const hasSiteDraftChanges = normalizedDraftName !== site.name || normalizedDraftDomain !== site.domain;
@@ -3760,19 +3510,6 @@ function SiteDetailOverlay({
             </button>
             <button
               className="site-detail-page__tab"
-              id="site-detail-documentation-tab"
-              type="button"
-              role="tab"
-              aria-label="Documentation"
-              aria-selected={activeTab === "documentation"}
-              aria-controls="site-detail-documentation-panel"
-              onClick={() => onTabChange("documentation")}
-            >
-              <SiteSettingsCategoryIcon icon="documentation" />
-              <span>Documentation</span>
-            </button>
-            <button
-              className="site-detail-page__tab"
               id="site-detail-theme-tab"
               type="button"
               role="tab"
@@ -3809,18 +3546,6 @@ function SiteDetailOverlay({
             >
               <SiteSettingsCategoryIcon icon="email" />
               <span>Email</span>
-            </button>
-            <button
-              className="site-detail-page__tab site-detail-page__tab--disabled"
-              type="button"
-              role="tab"
-              aria-selected="false"
-              aria-disabled="true"
-              tabIndex={-1}
-              disabled
-            >
-              <SiteSettingsCategoryIcon icon="automations" />
-              <span>Event routes</span>
             </button>
           </nav>
         </aside>
@@ -4085,65 +3810,7 @@ function SiteDetailOverlay({
                 {themeSaveError ? <p className="site-detail-panel__error">{themeSaveError}</p> : null}
               </section>
             </>
-          ) : (
-            <>
-              <header className="site-detail-page__header">
-                <div>
-                  <h1 id="siteDetailTitle">Documentation</h1>
-                </div>
-              </header>
-
-              <div className="site-detail-panel__documentation site-detail-page__section site-detail-page__section--flush">
-                {activeDocumentationGeneration ? (
-                  <DocumentationGenerationStepper
-                    activeStep={activeDocumentationGeneration.activeStep}
-                    completedSteps={activeDocumentationGeneration.completedSteps}
-                    stepProgress={activeDocumentationGeneration.stepProgress}
-                    steps={onboardingDocumentationSteps}
-                  />
-                ) : isStartingDocumentationGeneration || isGeneratingDocumentation ? (
-                  <DocumentationGenerationStepper
-                    activeStep={activeGenerationStep}
-                    completedSteps={completedGenerationSteps}
-                    stepProgress={generationStepProgress}
-                    steps={onboardingDocumentationSteps}
-                  />
-                ) : documentation ? (
-                  <DocumentationRouteBrowser
-                    documentation={documentation}
-                    backendDocumentation={backendDocumentation}
-                    documentationAgent={documentationAgent}
-                    activeView={activeDocumentationView}
-                    onViewChange={setActiveDocumentationView}
-                    filteredRoutes={filteredDocumentationRoutes}
-                    filteredEndpoints={filteredBackendEndpoints}
-                    search={documentationSearch}
-                    isRegenerating={isStartingDocumentationGeneration || isGeneratingDocumentation}
-                    error={generationError}
-                    onSearchChange={setDocumentationSearch}
-                    onRegenerate={() => void generateDocumentation()}
-                  />
-                ) : documentationAgent?.connected ? (
-                  <DocumentationReadyState
-                    error={generationError}
-                    onGenerate={() => void generateDocumentation()}
-                  />
-                ) : apiKeys.length === 0 ? (
-                  <DocumentationEmptyState
-                    icon={<KeyRound size={24} aria-hidden="true" />}
-                    title="Create a CLI key"
-                    description="Create a site-scoped key in Credentials, then run npx barkan connect from the client codebase."
-                  />
-                ) : (
-                  <DocumentationEmptyState
-                    icon={<BookOpen size={24} aria-hidden="true" />}
-                    title="Connect to your codebase"
-                    description="Run npx barkan connect with this site key from the client codebase, then generate documentation here."
-                  />
-                )}
-              </div>
-            </>
-          )}
+          ) : null}
         </div>
       </div>
     </section>
@@ -4205,257 +3872,6 @@ function DocumentationGenerationStepper({
   );
 }
 
-function DocumentationEmptyState({
-  icon,
-  title,
-  description
-}: {
-  icon: ReactNode;
-  title: string;
-  description: string;
-}) {
-  return (
-    <div className="documentation-empty-state">
-      {icon}
-      <h3>{title}</h3>
-      <p>{description}</p>
-    </div>
-  );
-}
-
-function DocumentationReadyState({
-  error,
-  onGenerate
-}: {
-  error: string;
-  onGenerate: () => void;
-}) {
-  return (
-    <div className="documentation-ready-state">
-      <div>
-        <h3>Ready to generate documentation</h3>
-        <p>Barkan detected the connected codebase.</p>
-      </div>
-      <button className="site-detail-page__section-action" type="button" onClick={onGenerate}>
-        Generate documentation
-      </button>
-      {error ? <p className="site-detail-panel__error">{error}</p> : null}
-    </div>
-  );
-}
-
-function DocumentationRouteBrowser({
-  documentation,
-  backendDocumentation,
-  documentationAgent,
-  activeView,
-  onViewChange,
-  filteredRoutes,
-  filteredEndpoints,
-  search,
-  isRegenerating,
-  error,
-  onSearchChange,
-  onRegenerate
-}: {
-  documentation: AtlasRouteMapDocument;
-  backendDocumentation: SiteBackendDocumentation;
-  documentationAgent: DocumentationAgentStatus | null;
-  activeView: DocumentationView;
-  onViewChange: (view: DocumentationView) => void;
-  filteredRoutes: AtlasRouteMapDocument["routes"];
-  filteredEndpoints: AtlasBackendInventoryDocument["endpoints"];
-  search: string;
-  isRegenerating: boolean;
-  error: string;
-  onSearchChange: (value: string) => void;
-  onRegenerate: () => void;
-}) {
-  const endpointCount = backendDocumentation?.endpoints.length ?? 0;
-  const sourceFileCount = new Set([
-    ...documentation.source_files,
-    ...(backendDocumentation?.source_files ?? [])
-  ]).size;
-
-  return (
-    <div className="documentation-browser">
-      <div className="documentation-browser__summary">
-        <div>
-          <h3>Documentation map</h3>
-          <p>{documentation.routes.length} frontend routes · {endpointCount} backend endpoints · {sourceFileCount} source files · {formatDocumentationTimestamp(documentation.generated_at)}</p>
-        </div>
-        <button
-          className="site-detail-page__section-action"
-          type="button"
-          onClick={onRegenerate}
-          disabled={isRegenerating}
-          title={documentationAgent?.connected ? "Regenerate documentation" : "Run npx barkan connect before regenerating"}
-        >
-          Regenerate doc
-        </button>
-      </div>
-
-      <div className="documentation-browser__switcher" role="group" aria-label="Documentation type">
-        <button
-          type="button"
-          className={activeView === "frontend" ? "documentation-browser__switch documentation-browser__switch--active" : "documentation-browser__switch"}
-          aria-pressed={activeView === "frontend"}
-          onClick={() => onViewChange("frontend")}
-        >
-          Frontend routes
-        </button>
-        <button
-          type="button"
-          className={activeView === "backend" ? "documentation-browser__switch documentation-browser__switch--active" : "documentation-browser__switch"}
-          aria-pressed={activeView === "backend"}
-          onClick={() => onViewChange("backend")}
-        >
-          Backend endpoints
-        </button>
-      </div>
-
-      {!documentationAgent?.connected ? (
-        <p className="documentation-browser__notice">
-          Run <code>npx barkan connect</code> from the client codebase before regenerating this documentation.
-        </p>
-      ) : null}
-      {error ? <p className="site-detail-panel__error">{error}</p> : null}
-
-      <label className="documentation-browser__search">
-        <Search size={17} aria-hidden="true" />
-        <span className="sr-only">Search documentation</span>
-        <input
-          type="search"
-          placeholder={activeView === "frontend" ? "Search routes..." : "Search endpoints..."}
-          value={search}
-          onChange={(event) => onSearchChange(event.target.value)}
-        />
-      </label>
-
-      {activeView === "frontend" ? (
-        <div className="documentation-browser__routes">
-          {filteredRoutes.length > 0 ? (
-            filteredRoutes.map((route) => (
-              <article className="documentation-browser__route" key={route.path}>
-                <code>{route.path}</code>
-                <p>{route.summary}</p>
-              </article>
-            ))
-          ) : (
-            <div className="documentation-empty-state documentation-empty-state--compact">
-              <Search size={22} aria-hidden="true" />
-              <h3>No routes found</h3>
-              <p>Try another path or summary keyword.</p>
-            </div>
-          )}
-        </div>
-      ) : (
-        <div className="documentation-browser__routes">
-          {!backendDocumentation ? (
-            <div className="documentation-empty-state documentation-empty-state--compact">
-              <FileText size={22} aria-hidden="true" />
-              <h3>No backend docs yet</h3>
-              <p>Regenerate documentation to create the backend endpoint inventory.</p>
-            </div>
-          ) : filteredEndpoints.length > 0 ? (
-            filteredEndpoints.map((endpoint) => (
-              <DocumentationBackendEndpointCard endpoint={endpoint} key={`${endpoint.method} ${endpoint.path}`} />
-            ))
-          ) : (
-            <div className="documentation-empty-state documentation-empty-state--compact">
-              <Search size={22} aria-hidden="true" />
-              <h3>No endpoints found</h3>
-              <p>Try another method, path, or summary keyword.</p>
-            </div>
-          )}
-        </div>
-      )}
-    </div>
-  );
-}
-
-function DocumentationBackendEndpointCard({
-  endpoint
-}: {
-  endpoint: AtlasBackendInventoryDocument["endpoints"][number];
-}) {
-  return (
-    <article className="documentation-browser__route documentation-browser__endpoint">
-      <div className="documentation-browser__endpoint-heading">
-        <span className={`documentation-browser__method documentation-browser__method--${endpoint.method.toLowerCase()}`}>
-          {endpoint.method}
-        </span>
-        <code>{endpoint.path}</code>
-      </div>
-      <p>{endpoint.summary}</p>
-      <dl className="documentation-browser__endpoint-meta">
-        <div>
-          <dt>Auth</dt>
-          <dd>{endpoint.auth}</dd>
-        </div>
-        <div>
-          <dt>Success</dt>
-          <dd>{endpoint.response.success}</dd>
-        </div>
-      </dl>
-      <DocumentationRequestFields request={endpoint.request} />
-      {endpoint.response.errors.length > 0 ? (
-        <div className="documentation-browser__endpoint-errors">
-          <span>Errors</span>
-          <ul>
-            {endpoint.response.errors.map((endpointError) => (
-              <li key={endpointError}>{endpointError}</li>
-            ))}
-          </ul>
-        </div>
-      ) : null}
-    </article>
-  );
-}
-
-function DocumentationRequestFields({
-  request
-}: {
-  request: AtlasBackendInventoryDocument["endpoints"][number]["request"];
-}) {
-  const sections = (["params", "query", "body"] as const)
-    .map((section) => ({
-      section,
-      fields: Object.entries(request[section] ?? {})
-    }))
-    .filter(({ fields }) => fields.length > 0);
-
-  if (sections.length === 0) {
-    return null;
-  }
-
-  return (
-    <div className="documentation-browser__request">
-      {sections.map(({ section, fields }) => (
-        <div className="documentation-browser__request-section" key={section}>
-          <span>{section}</span>
-          <DocumentationFieldList fields={fields} />
-        </div>
-      ))}
-    </div>
-  );
-}
-
-function DocumentationFieldList({
-  fields
-}: {
-  fields: Array<[string, { type: string; required: boolean; enum?: string[] }]>;
-}) {
-  return (
-    <div>
-      {fields.map(([fieldName, field]) => (
-        <code key={fieldName}>
-          {fieldName}: {field.type}{field.enum?.length ? ` enum [${field.enum.join(", ")}]` : ""}{field.required ? " required" : " optional"}
-        </code>
-      ))}
-    </div>
-  );
-}
 function SiteOnboardingScreen({
   onCancel,
   onCreated,

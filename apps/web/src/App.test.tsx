@@ -7,6 +7,7 @@ const testUser = {
   id: "user_1",
   email: "maxence@example.com",
   displayName: null,
+  phoneNumber: null,
   avatarUrl: null,
   notificationPreferences: {
     productEmails: true,

@@ -34,8 +34,14 @@ const avatarDataUrlSchema = z.string().trim().max(400_000).refine(
 const updateProfileSchema = z.object({
   displayName: z.string().trim().min(1).max(80).optional(),
   email: z.string().email().optional(),
+  phoneNumber: z.string().trim().min(3).max(32).nullable().optional(),
   avatarUrl: avatarDataUrlSchema.nullable().optional()
-}).refine((payload) => payload.displayName !== undefined || payload.email !== undefined || payload.avatarUrl !== undefined, {
+}).refine((payload) => (
+  payload.displayName !== undefined ||
+  payload.email !== undefined ||
+  payload.phoneNumber !== undefined ||
+  payload.avatarUrl !== undefined
+), {
   message: "at least one profile field is required"
 });
 
@@ -161,6 +167,10 @@ export function registerAuthRoutes(
         }
       }
       updates.email = email;
+    }
+
+    if (payload.phoneNumber !== undefined) {
+      updates.phoneNumber = payload.phoneNumber;
     }
 
     if (payload.avatarUrl !== undefined) {
@@ -353,6 +363,7 @@ function serializeUser(user: UserDocument) {
     id: String(user._id),
     email: user.email,
     displayName: user.displayName ?? null,
+    phoneNumber: user.phoneNumber ?? null,
     avatarUrl: user.avatarUrl ?? null,
     notificationPreferences: {
       productEmails: user.notificationPreferences?.productEmails ?? true,

@@ -5,6 +5,7 @@ export interface UserDocument extends Document {
   _id: ObjectId;
   email: string;
   displayName?: string;
+  phoneNumber?: string | null;
   avatarUrl?: string | null;
   notificationPreferences?: {
     productEmails: boolean;
