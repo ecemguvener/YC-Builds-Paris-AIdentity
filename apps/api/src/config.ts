@@ -42,7 +42,14 @@ const environmentSchema = z.object({
   EMAIL_SANDBOX_REDIRECT_TO: optionalNonEmptyStringSchema,
   // Stripe Issuing (test mode). When set, the payment tool provisions a real
   // virtual card and simulates authorizations via Stripe; unset => mock card.
-  STRIPE_SECRET_KEY: optionalNonEmptyStringSchema
+  STRIPE_SECRET_KEY: optionalNonEmptyStringSchema,
+  // Amazon purchase tool (Playwright browser automation). Operational config
+  // only — shipping/card are read from process.env at point-of-use and never
+  // stored in this object or logged. The login session is captured once via
+  // `npm run amazon:login` and persisted to AMAZON_STORAGE_STATE_PATH.
+  AMAZON_BASE_URL: z.string().min(1).default("https://www.amazon.com"),
+  AMAZON_STORAGE_STATE_PATH: z.string().min(1).default(".amazon-session.json"),
+  AMAZON_HEADLESS: z.string().min(1).default("false")
 }).transform((environment) => {
   return {
     ...environment,

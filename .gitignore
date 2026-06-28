@@ -15,3 +15,5 @@ coding-plans/
 **/.serval/debug/
 .barkan/debug/
 **/.barkan/debug/
+.amazon-session.json
+data/amazon-screenshots/

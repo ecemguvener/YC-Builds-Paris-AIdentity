@@ -11,6 +11,7 @@ import { registerEmailRoutes, registerSiteEmailRoutes } from "./email.js";
 import { registerIdentityRoutes } from "./identity.js";
 import { registerPaymentRoutes, registerSitePaymentRoutes } from "./payments.js";
 import { registerSiteRoutes } from "./sites.js";
+import { registerAmazonRoutes } from "./amazon/routes.js";
 
 export async function buildApp(config: AppConfig, collections: Collections) {
   const app = fastify({
@@ -92,6 +93,7 @@ export async function buildApp(config: AppConfig, collections: Collections) {
   registerPaymentRoutes(app, config);
   registerSitePaymentRoutes(app, collections, config);
   registerSiteRoutes(app, collections, config);
+  registerAmazonRoutes(app, config);
 
   return app;
 }
